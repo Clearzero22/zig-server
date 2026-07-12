@@ -21,6 +21,14 @@ Zig: `C:\Users\Administrator\zig\0.16.0\zig-x86_64-windows-0.16.0\zig.exe`
 - No comments in source code
 - Router owns all memory, freed in deinit
 
+## Workflow
+
+After every code change, run the full test suite:
+```bash
+zig build test
+```
+Do not skip tests or run only partial tests unless explicitly asked.
+
 ## Structure
 
 | File | Content |
