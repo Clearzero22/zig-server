@@ -2,6 +2,7 @@ const std = @import("std");
 const fw = @import("framework.zig");
 const logger = @import("builtins/logger.zig");
 const recovery = @import("builtins/recovery.zig");
+const swagger = @import("builtins/swagger.zig");
 
 pub fn main() !void {
     var gpa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -10,6 +11,8 @@ pub fn main() !void {
 
     var router = fw.Router.init(allocator);
     defer router.deinit();
+
+    try router.setOpenApiInfo("Zig Server API", "1.0.0", "A Zig web framework example");
 
     router.onError(recovery.handler);
 
@@ -27,6 +30,10 @@ pub fn main() !void {
 
     var api = router.group("/api/v1");
     try api.get("/hello", apiHelloHandler);
+
+    swagger.init(&router);
+    try router.get("/docs", swagger.docsHandler);
+    try router.get("/openapi.json", swagger.openapiHandler);
 
     const io = std.Io.Threaded.global_single_threaded.io();
     var server = try fw.Server.initPool(io, &router, 4);

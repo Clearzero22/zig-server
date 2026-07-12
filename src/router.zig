@@ -9,6 +9,7 @@ routes: std.ArrayList(Route),
 middleware: std.ArrayList(Middleware),
 error_handler: ?Handler = null,
 named_routes: std.StringHashMap([]const u8),
+openapi_info: ?OpenApiInfo = null,
 
 pub const Method = enum {
     GET,
@@ -42,6 +43,19 @@ pub const RouteOptions = struct {
     priority: i32 = 0,
     host: ?[]const u8 = null,
     headers: ?[]const HeaderMatch = null,
+
+    summary: ?[]const u8 = null,
+    description: ?[]const u8 = null,
+    tags: ?[]const u8 = null,
+    deprecated: bool = false,
+    body_type: ?[]const u8 = null,
+    response_type: ?[]const u8 = null,
+};
+
+pub const OpenApiInfo = struct {
+    title: []const u8,
+    version: []const u8,
+    description: ?[]const u8 = null,
 };
 
 pub const Segment = union(enum) {
@@ -63,6 +77,12 @@ pub const Route = struct {
     headers: ?[]const HeaderMatch = null,
     has_wildcard: bool = false,
     segments: []const Segment = &.{},
+    summary: ?[]const u8 = null,
+    description: ?[]const u8 = null,
+    tags: ?[]const u8 = null,
+    deprecated: bool = false,
+    body_type: ?[]const u8 = null,
+    response_type: ?[]const u8 = null,
 };
 
 pub const MatchResult = struct {
@@ -76,6 +96,7 @@ pub fn init(allocator: std.mem.Allocator) @This() {
         .routes = .empty,
         .middleware = .empty,
         .named_routes = std.StringHashMap([]const u8).init(allocator),
+        .openapi_info = null,
     };
 }
 
@@ -97,10 +118,20 @@ pub fn deinit(self: *@This()) void {
             }
         }
         self.allocator.free(route.segments);
+        if (route.summary) |s| self.allocator.free(s);
+        if (route.description) |d| self.allocator.free(d);
+        if (route.tags) |t| self.allocator.free(t);
+        if (route.body_type) |b| self.allocator.free(b);
+        if (route.response_type) |r| self.allocator.free(r);
     }
     self.routes.deinit(self.allocator);
     self.middleware.deinit(self.allocator);
     self.named_routes.deinit();
+    if (self.openapi_info) |info| {
+        self.allocator.free(info.title);
+        self.allocator.free(info.version);
+        if (info.description) |d| self.allocator.free(d);
+    }
 }
 
 pub fn use(self: *@This(), mw: Middleware) !void {
@@ -143,6 +174,12 @@ fn addRoute(self: *@This(), method: Method, path: []const u8, handler: Handler, 
         .headers = hdrs_dup,
         .has_wildcard = has_wc,
         .segments = segs,
+        .summary = if (opts.summary) |s| try self.allocator.dupe(u8, s) else null,
+        .description = if (opts.description) |d| try self.allocator.dupe(u8, d) else null,
+        .tags = if (opts.tags) |t| try self.allocator.dupe(u8, t) else null,
+        .deprecated = opts.deprecated,
+        .body_type = if (opts.body_type) |b| try self.allocator.dupe(u8, b) else null,
+        .response_type = if (opts.response_type) |r| try self.allocator.dupe(u8, r) else null,
     });
 
     if (opts.name) |n| {
@@ -251,6 +288,23 @@ pub fn patchOpts(self: *@This(), path: []const u8, handler: Handler, opts: Route
 pub fn url(self: *@This(), name: []const u8, params: anytype) ![]const u8 {
     const pattern = self.named_routes.get(name) orelse return error.RouteNotFound;
     return try buildURL(self.allocator, pattern, params);
+}
+
+pub fn setOpenApiInfo(self: *@This(), title: []const u8, version: []const u8, description: ?[]const u8) !void {
+    if (self.openapi_info) |old| {
+        self.allocator.free(old.title);
+        self.allocator.free(old.version);
+        if (old.description) |d| self.allocator.free(d);
+    }
+    self.openapi_info = .{
+        .title = try self.allocator.dupe(u8, title),
+        .version = try self.allocator.dupe(u8, version),
+        .description = if (description) |d| try self.allocator.dupe(u8, d) else null,
+    };
+}
+
+pub fn openapiJson(self: *@This(), allocator: std.mem.Allocator) ![]const u8 {
+    return try generateOpenApiJson(self, allocator);
 }
 
 fn buildURL(allocator: std.mem.Allocator, pattern: []const u8, params: anytype) ![]const u8 {
@@ -569,4 +623,282 @@ fn concat(allocator: std.mem.Allocator, prefix: []const u8, path: []const u8) ![
         try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, path })
     else
         try std.fmt.allocPrint(allocator, "{s}/{s}", .{ prefix, path });
+}
+
+fn segmentToOpenApi(seg: Segment, count: *usize) []const u8 {
+    return switch (seg) {
+        .exact => |e| e,
+        .param => blk: {
+            count.* += 1;
+            break :blk "{param}";
+        },
+        .optional_param => blk: {
+            count.* += 1;
+            break :blk "{param}";
+        },
+        .wildcard => blk: {
+            count.* += 1;
+            break :blk "{param}";
+        },
+        .regex => blk: {
+            count.* += 1;
+            break :blk "{param}";
+        },
+        .multi_param => |mp| blk: {
+            count.* += @intCast(mp.len);
+            break :blk "{param}";
+        },
+    };
+}
+
+fn generateOpenApiJson(router: *Router, allocator: std.mem.Allocator) ![]const u8 {
+    var buf = std.ArrayList(u8).empty;
+    errdefer buf.deinit(allocator);
+
+    const info = router.openapi_info orelse @as(OpenApiInfo, .{
+        .title = "API",
+        .version = "1.0.0",
+        .description = null,
+    });
+
+    try buf.appendSlice(allocator, "{\n");
+    try buf.appendSlice(allocator, "  \"openapi\": \"3.0.3\",\n");
+    try buf.appendSlice(allocator, "  \"info\": {\n");
+    try buf.appendSlice(allocator, "    \"title\": \"");
+    try appendJsonStr(&buf, allocator, info.title);
+    try buf.appendSlice(allocator, "\",\n");
+    try buf.appendSlice(allocator, "    \"version\": \"");
+    try appendJsonStr(&buf, allocator, info.version);
+    try buf.appendSlice(allocator, "\"");
+    if (info.description) |d| {
+        try buf.appendSlice(allocator, ",\n    \"description\": \"");
+        try appendJsonStr(&buf, allocator, d);
+        try buf.appendSlice(allocator, "\"");
+    }
+    try buf.appendSlice(allocator, "\n  },\n");
+    try buf.appendSlice(allocator, "  \"paths\": {\n");
+
+    var first_path = true;
+    for (router.routes.items) |route| {
+        if (route.path.len == 0 or route.path[0] != '/') {
+            continue;
+        }
+        var param_count: usize = 0;
+        var openapi_path = std.ArrayList(u8).empty;
+        defer openapi_path.deinit(allocator);
+        for (route.segments) |seg| {
+            if (seg == .exact and seg.exact.len == 0) continue;
+            try openapi_path.append(allocator, '/');
+            const replaced = segmentToOpenApi(seg, &param_count);
+            try openapi_path.appendSlice(allocator, replaced);
+        }
+        if (openapi_path.items.len == 0) {
+            try openapi_path.append(allocator, '/');
+        }
+
+        const path_str = try openapi_path.toOwnedSlice(allocator);
+        defer allocator.free(path_str);
+
+        if (!first_path) {
+            try buf.appendSlice(allocator, ",\n");
+        } else {
+            first_path = false;
+        }
+        try buf.appendSlice(allocator, "    \"");
+        try appendJsonStr(&buf, allocator, path_str);
+        try buf.appendSlice(allocator, "\": {\n");
+
+        const ml = @tagName(route.method);
+        var lower_buf: [5]u8 = undefined;
+        for (ml, 0..) |c, i| {
+            lower_buf[i] = std.ascii.toLower(c);
+        }
+
+        try buf.appendSlice(allocator, "      \"");
+        try buf.appendSlice(allocator, lower_buf[0..ml.len]);
+        try buf.appendSlice(allocator, "\": {\n");
+        try buf.appendSlice(allocator, "        \"summary\": \"");
+        if (route.summary) |s| {
+            try appendJsonStr(&buf, allocator, s);
+        } else if (route.name) |n| {
+            try appendJsonStr(&buf, allocator, n);
+        } else {
+            try appendJsonStr(&buf, allocator, route.path);
+        }
+        try buf.appendSlice(allocator, "\",\n");
+
+        if (route.description) |d| {
+            try buf.appendSlice(allocator, "        \"description\": \"");
+            try appendJsonStr(&buf, allocator, d);
+            try buf.appendSlice(allocator, "\",\n");
+        }
+
+        if (route.deprecated) {
+            try buf.appendSlice(allocator, "        \"deprecated\": true,\n");
+        }
+
+        if (route.tags) |t| {
+            try buf.appendSlice(allocator, "        \"tags\": [");
+            var tag_it = std.mem.splitScalar(u8, t, ',');
+            var first_tag = true;
+            while (tag_it.next()) |tag_item| {
+                const trimmed = std.mem.trim(u8, tag_item, " ");
+                if (trimmed.len == 0) continue;
+                if (!first_tag) try buf.appendSlice(allocator, ", ");
+                first_tag = false;
+                try buf.appendSlice(allocator, "\"");
+                try appendJsonStr(&buf, allocator, trimmed);
+                try buf.appendSlice(allocator, "\"");
+            }
+            try buf.appendSlice(allocator, "],\n");
+        }
+
+        var path_params = std.ArrayList(u8).empty;
+        defer path_params.deinit(allocator);
+        var body_type: ?[]const u8 = null;
+        var response_type: ?[]const u8 = null;
+        var needs_body = false;
+
+        for (route.segments) |seg| {
+            switch (seg) {
+                .param => |name| {
+                    if (path_params.items.len > 0) try path_params.append(allocator, ',');
+                    try path_params.appendSlice(allocator, "        {\n");
+                    try path_params.appendSlice(allocator, "          \"name\": \"");
+                    try appendJsonStr(&path_params, allocator, name);
+                    try path_params.appendSlice(allocator, "\",\n");
+                    try path_params.appendSlice(allocator, "          \"in\": \"path\",\n");
+                    try path_params.appendSlice(allocator, "          \"required\": true,\n");
+                    try path_params.appendSlice(allocator, "          \"schema\": { \"type\": \"string\" }\n");
+                    try path_params.appendSlice(allocator, "        }");
+                },
+                .optional_param => |name| {
+                    if (path_params.items.len > 0) try path_params.append(allocator, ',');
+                    try path_params.appendSlice(allocator, "        {\n");
+                    try path_params.appendSlice(allocator, "          \"name\": \"");
+                    try appendJsonStr(&path_params, allocator, name);
+                    try path_params.appendSlice(allocator, "\",\n");
+                    try path_params.appendSlice(allocator, "          \"in\": \"path\",\n");
+                    try path_params.appendSlice(allocator, "          \"required\": false,\n");
+                    try path_params.appendSlice(allocator, "          \"schema\": { \"type\": \"string\" }\n");
+                    try path_params.appendSlice(allocator, "        }");
+                },
+                .wildcard => |name| {
+                    if (name.len > 0) {
+                        if (path_params.items.len > 0) try path_params.append(allocator, ',');
+                        try path_params.appendSlice(allocator, "        {\n");
+                        try path_params.appendSlice(allocator, "          \"name\": \"");
+                        try appendJsonStr(&path_params, allocator, name);
+                        try path_params.appendSlice(allocator, "\",\n");
+                        try path_params.appendSlice(allocator, "          \"in\": \"path\",\n");
+                        try path_params.appendSlice(allocator, "          \"required\": true,\n");
+                        try path_params.appendSlice(allocator, "          \"schema\": { \"type\": \"string\" }\n");
+                        try path_params.appendSlice(allocator, "        }");
+                    }
+                },
+                .regex => |pattern| {
+                    if (path_params.items.len > 0) try path_params.append(allocator, ',');
+                    try path_params.appendSlice(allocator, "        {\n");
+                    try path_params.appendSlice(allocator, "          \"name\": \"param");
+                    try path_params.appendSlice(allocator, "\",\n");
+                    try path_params.appendSlice(allocator, "          \"in\": \"path\",\n");
+                    try path_params.appendSlice(allocator, "          \"required\": true,\n");
+                    try path_params.appendSlice(allocator, "          \"schema\": { \"type\": \"string\" },\n");
+                    try path_params.appendSlice(allocator, "          \"pattern\": \"");
+                    try appendJsonStr(&path_params, allocator, pattern);
+                    try path_params.appendSlice(allocator, "\"\n");
+                    try path_params.appendSlice(allocator, "        }");
+                },
+                .multi_param => |mp| {
+                    for (mp) |name| {
+                        if (path_params.items.len > 0) try path_params.append(allocator, ',');
+                        try path_params.appendSlice(allocator, "        {\n");
+                        try path_params.appendSlice(allocator, "          \"name\": \"");
+                        try appendJsonStr(&path_params, allocator, name);
+                        try path_params.appendSlice(allocator, "\",\n");
+                        try path_params.appendSlice(allocator, "          \"in\": \"path\",\n");
+                        try path_params.appendSlice(allocator, "          \"required\": true,\n");
+                        try path_params.appendSlice(allocator, "          \"schema\": { \"type\": \"string\" }\n");
+                        try path_params.appendSlice(allocator, "        }");
+                    }
+                },
+                .exact => {},
+            }
+        }
+
+        body_type = route.body_type;
+        response_type = route.response_type;
+        needs_body = body_type != null;
+
+        if (route.method == .POST or route.method == .PUT or route.method == .PATCH) {
+            needs_body = needs_body or body_type == null;
+        }
+
+        if (path_params.items.len > 0 or needs_body or response_type != null) {
+            try buf.appendSlice(allocator, "        \"parameters\": [\n");
+            if (path_params.items.len > 0) {
+                try buf.appendSlice(allocator, path_params.items);
+            }
+            try buf.appendSlice(allocator, "\n        ],\n");
+        }
+
+        if (needs_body) {
+            try buf.appendSlice(allocator, "        \"requestBody\": {\n");
+            try buf.appendSlice(allocator, "          \"required\": true,\n");
+            try buf.appendSlice(allocator, "          \"content\": {\n");
+            try buf.appendSlice(allocator, "            \"application/json\": {\n");
+            try buf.appendSlice(allocator, "              \"schema\": { \"$ref\": \"#/components/schemas/");
+            try appendJsonStr(&buf, allocator, body_type orelse "Request");
+            try buf.appendSlice(allocator, "\" }\n");
+            try buf.appendSlice(allocator, "            }\n");
+            try buf.appendSlice(allocator, "          }\n");
+            try buf.appendSlice(allocator, "        },\n");
+        }
+
+        try buf.appendSlice(allocator, "        \"responses\": {\n");
+        try buf.appendSlice(allocator, "          \"200\": {\n");
+        try buf.appendSlice(allocator, "            \"description\": \"");
+        if (response_type) |rsp| {
+            try appendJsonStr(&buf, allocator, rsp);
+        } else {
+            try buf.appendSlice(allocator, "Success");
+        }
+        try buf.appendSlice(allocator, "\"");
+        if (response_type) |rsp| {
+            try buf.appendSlice(allocator, ",\n");
+            try buf.appendSlice(allocator, "            \"content\": {\n");
+            try buf.appendSlice(allocator, "              \"application/json\": {\n");
+            try buf.appendSlice(allocator, "                \"schema\": { \"$ref\": \"#/components/schemas/");
+            try appendJsonStr(&buf, allocator, rsp);
+            try buf.appendSlice(allocator, "\" }\n");
+            try buf.appendSlice(allocator, "              }\n");
+            try buf.appendSlice(allocator, "            }\n");
+        }
+        try buf.appendSlice(allocator, "\n          }\n");
+        try buf.appendSlice(allocator, "        }\n");
+
+        try buf.appendSlice(allocator, "      }\n");
+        try buf.appendSlice(allocator, "    }");
+    }
+
+    try buf.appendSlice(allocator, "\n  },\n");
+    try buf.appendSlice(allocator, "  \"components\": {\n");
+    try buf.appendSlice(allocator, "    \"schemas\": {}\n");
+    try buf.appendSlice(allocator, "  }\n");
+    try buf.appendSlice(allocator, "}\n");
+
+    return buf.toOwnedSlice(allocator);
+}
+
+fn appendJsonStr(buf: *std.ArrayList(u8), allocator: std.mem.Allocator, s: []const u8) !void {
+    for (s) |c| {
+        switch (c) {
+            '"' => try buf.appendSlice(allocator, "\\\""),
+            '\\' => try buf.appendSlice(allocator, "\\\\"),
+            '\n' => try buf.appendSlice(allocator, "\\n"),
+            '\r' => try buf.appendSlice(allocator, "\\r"),
+            '\t' => try buf.appendSlice(allocator, "\\t"),
+            else => try buf.append(allocator, c),
+        }
+    }
 }

@@ -311,3 +311,114 @@ test "router: named route not found" {
 
     try std.testing.expectError(error.RouteNotFound, router.url("nonexistent", .{}));
 }
+
+test "router: openapi json generates valid structure" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    try router.setOpenApiInfo("Test API", "2.0.0", "A test API");
+    const H = struct { fn h(_: *Context) !void {} };
+    try router.getOpts("/users/:id", H.h, .{ .name = "getUser", .summary = "Get user by ID", .tags = "users" });
+    try router.getOpts("/docs", H.h, .{});
+
+    const json = try router.openapiJson(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"openapi\": \"3.0.3\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"title\": \"Test API\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"version\": \"2.0.0\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"description\": \"A test API\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"summary\": \"Get user by ID\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"tags\": [\"users\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "/users/{param}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "/docs") != null);
+}
+
+test "router: openapi with structured metadata" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    try router.setOpenApiInfo("My API", "1.0.0", null);
+    const H = struct { fn h(_: *Context) !void {} };
+
+    try router.postOpts("/echo", H.h, .{
+        .name = "echo",
+        .summary = "Echo request",
+        .description = "Returns the request body as-is",
+        .tags = "echo,testing",
+        .deprecated = false,
+        .body_type = "EchoRequest",
+        .response_type = "EchoResponse",
+    });
+
+    const json = try router.openapiJson(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"summary\": \"Echo request\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"description\": \"Returns the request body as-is\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"tags\": [\"echo\", \"testing\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"$ref\": \"#/components/schemas/EchoRequest\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"$ref\": \"#/components/schemas/EchoResponse\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"requestBody\"") != null);
+}
+
+test "router: openapi with deprecated route" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    try router.setOpenApiInfo("Deprecated API", "1.0.0", null);
+    const H = struct { fn h(_: *Context) !void {} };
+
+    try router.getOpts("/old", H.h, .{
+        .summary = "Old endpoint",
+        .deprecated = true,
+    });
+
+    const json = try router.openapiJson(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"deprecated\": true") != null);
+}
+
+test "router: openapi no info falls back to defaults" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    const H = struct { fn h(_: *Context) !void {} };
+    try router.get("/hello", H.h);
+
+    const json = try router.openapiJson(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"title\": \"API\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"version\": \"1.0.0\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"paths\"") != null);
+}
+
+test "router: openapi empty router produces valid structure" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    const json = try router.openapiJson(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"paths\": {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"components\": {") != null);
+}
+
+test "router: openapi deinit frees metadata" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+    try router.setOpenApiInfo("Temp", "0.1.0", "desc");
+    const H = struct { fn h(_: *Context) !void {} };
+    try router.getOpts("/x", H.h, .{
+        .summary = "Sum",
+        .description = "Desc",
+        .tags = "a,b",
+        .body_type = "Req",
+        .response_type = "Res",
+    });
+    const json = try router.openapiJson(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"summary\": \"Sum\"") != null);
+}
