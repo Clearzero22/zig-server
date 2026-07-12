@@ -91,7 +91,7 @@ pub fn redirect(ctx: *@This(), status: http.Status, url: []const u8) !void {
 
 fn respondExtra(ctx: *@This(), data: []const u8, opts: anytype, extra: []const http.Header) !void {
     const has_cors = ctx.cors_origin != null;
-    var buf: [8]http.Header = undefined;
+    var buf: [24]http.Header = undefined;
     var n: usize = 0;
 
     if (has_cors) {

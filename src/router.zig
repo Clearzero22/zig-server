@@ -10,6 +10,7 @@ middleware: std.ArrayList(Middleware),
 error_handler: ?Handler = null,
 named_routes: std.StringHashMap([]const u8),
 openapi_info: ?OpenApiInfo = null,
+sorted: bool = false,
 
 pub const Method = enum {
     GET,
@@ -97,6 +98,7 @@ pub fn init(allocator: std.mem.Allocator) @This() {
         .middleware = .empty,
         .named_routes = std.StringHashMap([]const u8).init(allocator),
         .openapi_info = null,
+        .sorted = true,
     };
 }
 
@@ -181,6 +183,8 @@ fn addRoute(self: *@This(), method: Method, path: []const u8, handler: Handler, 
         .body_type = if (opts.body_type) |b| try self.allocator.dupe(u8, b) else null,
         .response_type = if (opts.response_type) |r| try self.allocator.dupe(u8, r) else null,
     });
+
+    self.sorted = false;
 
     if (opts.name) |n| {
         self.named_routes.put(n, path) catch {};
@@ -356,16 +360,10 @@ fn buildURL(allocator: std.mem.Allocator, pattern: []const u8, params: anytype) 
 }
 
 pub fn match(self: *@This(), method: Method, target: []const u8) ?MatchResult {
-    self.sortRoutes();
+    if (!self.sorted) self.sortRoutes();
 
     for (self.routes.items) |route| {
         if (route.method != method) continue;
-
-        if (route.host) |host| {
-            if (!std.mem.eql(u8, host, "")) {
-                continue;
-            }
-        }
 
         var params: Context.Params = .{};
         if (matchSegments(route.segments, target, &params)) {
@@ -376,6 +374,7 @@ pub fn match(self: *@This(), method: Method, target: []const u8) ?MatchResult {
 }
 
 fn sortRoutes(self: *@This()) void {
+    self.sorted = true;
     std.mem.sort(Route, self.routes.items, {}, struct {
         fn less(_: void, a: Route, b: Route) bool {
             if (a.priority != b.priority) return a.priority > b.priority;
@@ -625,29 +624,14 @@ fn concat(allocator: std.mem.Allocator, prefix: []const u8, path: []const u8) ![
         try std.fmt.allocPrint(allocator, "{s}/{s}", .{ prefix, path });
 }
 
-fn segmentToOpenApi(seg: Segment, count: *usize) []const u8 {
+fn segmentToOpenApi(seg: Segment) []const u8 {
     return switch (seg) {
         .exact => |e| e,
-        .param => blk: {
-            count.* += 1;
-            break :blk "{param}";
-        },
-        .optional_param => blk: {
-            count.* += 1;
-            break :blk "{param}";
-        },
-        .wildcard => blk: {
-            count.* += 1;
-            break :blk "{param}";
-        },
-        .regex => blk: {
-            count.* += 1;
-            break :blk "{param}";
-        },
-        .multi_param => |mp| blk: {
-            count.* += @intCast(mp.len);
-            break :blk "{param}";
-        },
+        .param => "{param}",
+        .optional_param => "{param}",
+        .wildcard => "{param}",
+        .regex => "{param}",
+        .multi_param => "{param}",
     };
 }
 
@@ -683,13 +667,12 @@ fn generateOpenApiJson(router: *Router, allocator: std.mem.Allocator) ![]const u
         if (route.path.len == 0 or route.path[0] != '/') {
             continue;
         }
-        var param_count: usize = 0;
         var openapi_path = std.ArrayList(u8).empty;
         defer openapi_path.deinit(allocator);
         for (route.segments) |seg| {
             if (seg == .exact and seg.exact.len == 0) continue;
             try openapi_path.append(allocator, '/');
-            const replaced = segmentToOpenApi(seg, &param_count);
+            const replaced = segmentToOpenApi(seg);
             try openapi_path.appendSlice(allocator, replaced);
         }
         if (openapi_path.items.len == 0) {
@@ -755,9 +738,7 @@ fn generateOpenApiJson(router: *Router, allocator: std.mem.Allocator) ![]const u
 
         var path_params = std.ArrayList(u8).empty;
         defer path_params.deinit(allocator);
-        var body_type: ?[]const u8 = null;
-        var response_type: ?[]const u8 = null;
-        var needs_body = false;
+        var needs_body = route.body_type != null;
 
         for (route.segments) |seg| {
             switch (seg) {
@@ -826,15 +807,11 @@ fn generateOpenApiJson(router: *Router, allocator: std.mem.Allocator) ![]const u
             }
         }
 
-        body_type = route.body_type;
-        response_type = route.response_type;
-        needs_body = body_type != null;
-
         if (route.method == .POST or route.method == .PUT or route.method == .PATCH) {
-            needs_body = needs_body or body_type == null;
+            needs_body = needs_body or route.body_type == null;
         }
 
-        if (path_params.items.len > 0 or needs_body or response_type != null) {
+        if (path_params.items.len > 0 or needs_body or route.response_type != null) {
             try buf.appendSlice(allocator, "        \"parameters\": [\n");
             if (path_params.items.len > 0) {
                 try buf.appendSlice(allocator, path_params.items);
@@ -848,7 +825,7 @@ fn generateOpenApiJson(router: *Router, allocator: std.mem.Allocator) ![]const u
             try buf.appendSlice(allocator, "          \"content\": {\n");
             try buf.appendSlice(allocator, "            \"application/json\": {\n");
             try buf.appendSlice(allocator, "              \"schema\": { \"$ref\": \"#/components/schemas/");
-            try appendJsonStr(&buf, allocator, body_type orelse "Request");
+            try appendJsonStr(&buf, allocator, route.body_type orelse "Request");
             try buf.appendSlice(allocator, "\" }\n");
             try buf.appendSlice(allocator, "            }\n");
             try buf.appendSlice(allocator, "          }\n");
@@ -858,13 +835,13 @@ fn generateOpenApiJson(router: *Router, allocator: std.mem.Allocator) ![]const u
         try buf.appendSlice(allocator, "        \"responses\": {\n");
         try buf.appendSlice(allocator, "          \"200\": {\n");
         try buf.appendSlice(allocator, "            \"description\": \"");
-        if (response_type) |rsp| {
+        if (route.response_type) |rsp| {
             try appendJsonStr(&buf, allocator, rsp);
         } else {
             try buf.appendSlice(allocator, "Success");
         }
         try buf.appendSlice(allocator, "\"");
-        if (response_type) |rsp| {
+        if (route.response_type) |rsp| {
             try buf.appendSlice(allocator, ",\n");
             try buf.appendSlice(allocator, "            \"content\": {\n");
             try buf.appendSlice(allocator, "              \"application/json\": {\n");

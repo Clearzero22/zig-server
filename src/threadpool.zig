@@ -39,8 +39,13 @@ pub fn deinit(self: *@This()) void {
 }
 
 pub fn submit(self: *@This(), job_io: std.Io, router: *Router, conn: std.Io.net.Stream) void {
+    var spins: usize = 0;
     while (!self.mutex.tryLock()) {
-        std.Thread.yield() catch {};
+        spins += 1;
+        if (spins >= 256) {
+            std.Thread.yield() catch {};
+            spins = 0;
+        }
     }
     defer self.mutex.unlock();
     self.jobs.append(self.allocator, .{ .io = job_io, .router = router, .conn = conn }) catch {
@@ -52,9 +57,14 @@ fn workerFn(pool: *@This()) void {
     while (pool.running) {
         var job: ?Job = null;
         {
+            var spins: usize = 0;
             while (!pool.mutex.tryLock()) {
                 if (!pool.running) return;
-                std.Thread.yield() catch {};
+                spins += 1;
+                if (spins >= 256) {
+                    std.Thread.yield() catch {};
+                    spins = 0;
+                }
             }
             defer pool.mutex.unlock();
             if (pool.jobs.items.len > 0) {
