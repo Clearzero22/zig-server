@@ -1,0 +1,5 @@
+zig-out/
+.zig-cache/
+server_out.txt
+server_err.txt
+*.exe
