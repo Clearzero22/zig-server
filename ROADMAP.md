@@ -144,7 +144,7 @@
 - [ ] Static file directory listing
 - [ ] Static file pre-compression (.gz, .br)
 - [ ] In-memory static file cache
-- [ ] Graceful shutdown (SIGTERM, draining connections)
+- [x] Graceful shutdown (loopback connect to unblock accept)
 - [ ] Connection timeout management
 - [ ] Idle connection timeout
 - [ ] Request timeout middleware
