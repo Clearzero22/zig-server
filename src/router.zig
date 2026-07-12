@@ -696,9 +696,12 @@ fn generateOpenApiJson(router: *Router, allocator: std.mem.Allocator) ![]const u
         for (ml, 0..) |c, i| {
             lower_buf[i] = std.ascii.toLower(c);
         }
+        for (ml, 0..) |c, i| {
+            lower_buf[i] = std.ascii.toLower(c);
+        }
 
         try buf.appendSlice(allocator, "      \"");
-        try buf.appendSlice(allocator, lower_buf[0..ml.len]);
+        try buf.appendSlice(allocator, &lower_buf);
         try buf.appendSlice(allocator, "\": {\n");
         try buf.appendSlice(allocator, "        \"summary\": \"");
         if (route.summary) |s| {

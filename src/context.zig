@@ -23,6 +23,7 @@ request: *http.Server.Request,
 params: Params = .{},
 query: QueryParams = .{},
 cors_origin: ?[]const u8 = null,
+max_body_size: usize = 10 * 1024 * 1024,
 
 pub fn json(ctx: *@This(), status: http.Status, data: []const u8) !void {
     try respondExtra(ctx, data, .{
@@ -71,6 +72,7 @@ pub fn internalError(ctx: *@This(), _: anyerror) !void {
 
 pub fn readBody(ctx: *@This()) ![]const u8 {
     const len = ctx.request.head.content_length orelse return error.BodyRequired;
+    if (len > ctx.max_body_size) return error.BodyTooLarge;
     var transfer_buf: [8192]u8 = undefined;
     const body_reader = ctx.request.server.reader.bodyReader(
         &transfer_buf,

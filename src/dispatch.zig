@@ -12,6 +12,10 @@ pub fn dispatch(ctx: *Context, router: *Router) void {
     }
 }
 
+pub fn handle(ctx: *Context, router: *Router) void {
+    dispatch(ctx, router);
+}
+
 pub fn dispatchInner(ctx: *Context, router: *Router) !void {
     const target = ctx.request.head.target;
     const path = pathOnly(target);

@@ -89,5 +89,5 @@ fn handleConnectionThread(io: std.Io, router: *Router, conn: std.Io.net.Stream) 
 }
 
 fn dispatch(ctx: *Context, router: *Router) void {
-    Dispatch.dispatch(ctx, router);
+    Dispatch.handle(ctx, router);
 }

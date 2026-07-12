@@ -105,5 +105,5 @@ fn handleConnection(io: std.Io, router: *Router, conn: std.Io.net.Stream) void {
 }
 
 fn dispatch(ctx: *Context, router: *Router) void {
-    Dispatch.dispatch(ctx, router);
+    Dispatch.handle(ctx, router);
 }
