@@ -11,6 +11,39 @@ zig build run
 # → Listening on 0.0.0.0:8080
 ```
 
+## Usage as a Library
+
+Add to your `build.zig.zon`:
+
+```zig
+.{
+    .name = "my-app",
+    .version = "0.1.0",
+    .dependencies = .{
+        .zig_server = .{
+            .url = "https://github.com/Clearzero22/zig-server/archive/master.tar.gz",
+            .hash = "1220...",  // zig build will tell you the hash
+        },
+    },
+}
+```
+
+Then in your `build.zig`:
+
+```zig
+const zig_server = b.dependency("zig_server", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.root_module.addImport("zig-server", zig_server.module("zig-server"));
+```
+
+Now in your code:
+
+```zig
+const fw = @import("zig-server");
+```
+
 ## Example
 
 ```zig
