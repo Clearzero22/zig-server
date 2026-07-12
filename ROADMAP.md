@@ -7,13 +7,13 @@
 - [x] Path parameters (`/users/:id`)
 - [x] HTTP method routing (GET, POST, PUT, DELETE, PATCH)
 - [x] Route groups with prefix (`/api/v1`)
-- [ ] Wildcard/glob routes (`/static/*path`)
-- [ ] Regex route patterns
-- [ ] Route naming and URL generation (reverse routing)
-- [ ] Optional parameters (`/users/:id?`)
-- [ ] Multiple parameters per segment (`/files/:dir+:name`)
-- [ ] Route priorities and conflict detection
-- [ ] Custom matchers (header-based, host-based)
+- [x] Wildcard/glob routes (`/static/*path`)
+- [x] Regex route patterns (`(\d+)`)
+- [x] Route naming and URL generation (reverse routing)
+- [x] Optional parameters (`/users/:id?`)
+- [x] Multiple parameters per segment (`/files/:dir+:name`)
+- [x] Route priorities and conflict detection
+- [x] Custom matchers (header-based, host-based)
 
 ### Advanced
 - [ ] Sub-routers / resource routing

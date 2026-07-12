@@ -81,7 +81,6 @@ test "router: HEAD mapped to GET" {
     try std.testing.expectEqual(null, Router.Method.fromHttp(.OPTIONS));
     try std.testing.expectEqual(null, Router.Method.fromHttp(.CONNECT));
     try std.testing.expectEqual(null, Router.Method.fromHttp(.TRACE));
-    try std.testing.expectEqual(null, Router.Method.fromHttp(.OPTIONS));
 }
 
 test "router: group prefix" {
@@ -194,4 +193,121 @@ test "router: path encoding literal match" {
     }.h);
 
     try std.testing.expect(router.match(.GET, "/literal") != null);
+}
+
+test "router: wildcard match" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    try router.getOpts("/static/*path", struct {
+        fn h(_: *Context) !void {}
+    }.h, .{});
+
+    const r1 = router.match(.GET, "/static/css/style.css");
+    try std.testing.expect(r1 != null);
+    try std.testing.expectEqualStrings("css/style.css", r1.?.params.get("path").?);
+
+    const r2 = router.match(.GET, "/static/");
+    try std.testing.expect(r2 != null);
+    try std.testing.expectEqualStrings("", r2.?.params.get("path").?);
+
+    try std.testing.expect(router.match(.GET, "/other") == null);
+}
+
+test "router: wildcard bare star" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    try router.getOpts("/*path", struct {
+        fn h(_: *Context) !void {}
+    }.h, .{});
+
+    const r = router.match(.GET, "/anything/at/all");
+    try std.testing.expect(r != null);
+    try std.testing.expectEqualStrings("anything/at/all", r.?.params.get("path").?);
+}
+
+test "router: optional param" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    try router.getOpts("/users/:id?", struct {
+        fn h(_: *Context) !void {}
+    }.h, .{});
+
+    const r1 = router.match(.GET, "/users/42");
+    try std.testing.expect(r1 != null);
+    try std.testing.expectEqualStrings("42", r1.?.params.get("id").?);
+
+    const r2 = router.match(.GET, "/users");
+    try std.testing.expect(r2 != null);
+    try std.testing.expect(r2.?.params.get("id") == null);
+}
+
+test "router: multi param segment" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    try router.getOpts("/files/:dir+:name", struct {
+        fn h(_: *Context) !void {}
+    }.h, .{});
+
+    const r = router.match(.GET, "/files/foo+bar");
+    try std.testing.expect(r != null);
+    try std.testing.expectEqualStrings("foo", r.?.params.get("dir").?);
+    try std.testing.expectEqualStrings("bar", r.?.params.get("name").?);
+}
+
+test "router: regex digit match" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    try router.getOpts("/posts/(\\d+)", struct {
+        fn h(_: *Context) !void {}
+    }.h, .{});
+
+    try std.testing.expect(router.match(.GET, "/posts/123") != null);
+    try std.testing.expect(router.match(.GET, "/posts/abc") == null);
+}
+
+test "router: route priority" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    const H = struct { fn h(_: *Context) !void {} };
+
+    try router.getOpts("/users/:id", H.h, .{ .priority = 0 });
+    try router.getOpts("/users/me", H.h, .{ .priority = 1 });
+
+    const r = router.match(.GET, "/users/me");
+    try std.testing.expect(r != null);
+    try std.testing.expect(r.?.params.get("id") == null);
+}
+
+test "router: conflict detection" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    const H = struct { fn h(_: *Context) !void {} };
+    try router.get("/dup", H.h);
+    try std.testing.expectError(error.RouteConflict, router.get("/dup", H.h));
+}
+
+test "router: reverse routing" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    const H = struct { fn h(_: *Context) !void {} };
+    try router.getOpts("/users/:id", H.h, .{ .name = "user" });
+
+    const url = try router.url("user", .{ .id = "42" });
+    defer std.testing.allocator.free(url);
+    try std.testing.expectEqualStrings("/users/42", url);
+}
+
+test "router: named route not found" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    try std.testing.expectError(error.RouteNotFound, router.url("nonexistent", .{}));
 }
