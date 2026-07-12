@@ -11,37 +11,40 @@ zig build run
 # → Listening on 0.0.0.0:8080
 ```
 
-## Usage as a Library
+## How to Use as a Library
 
-Add to your `build.zig.zon`:
+### Option 1: Zig Package Manager (推荐)
 
-```zig
-.{
-    .name = "my-app",
-    .version = "0.1.0",
-    .dependencies = .{
-        .zig_server = .{
-            .url = "https://github.com/Clearzero22/zig-server/archive/master.tar.gz",
-            .hash = "1220...",  // zig build will tell you the hash
-        },
-    },
-}
+在项目根目录运行：
+
+```bash
+zig fetch --save https://github.com/Clearzero22/zig-server/archive/master.tar.gz
 ```
 
-Then in your `build.zig`:
+这会自动添加依赖到你的 `build.zig.zon`。然后在 `build.zig` 中：
 
 ```zig
-const zig_server = b.dependency("zig_server", .{
-    .target = target,
-    .optimize = optimize,
-});
-exe.root_module.addImport("zig-server", zig_server.module("zig-server"));
+const exe = b.addExecutable(.{ .name = "my-app", .root_module = b.createModule(...) });
+const zs = b.dependency("zig_server", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("zig-server", zs.module("zig-server"));
 ```
 
-Now in your code:
+代码中：
 
 ```zig
 const fw = @import("zig-server");
+var router = fw.Router.init(allocator);
+```
+
+### Option 2: Git Submodule
+
+```bash
+git submodule add https://github.com/Clearzero22/zig-server.git lib/zig-server
+```
+
+```zig
+// 直接相对路径导入
+const fw = @import("lib/zig-server/src/framework.zig");
 ```
 
 ## Example
