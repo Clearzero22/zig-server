@@ -6,7 +6,7 @@
 - [x] Static path matching (`/users`)
 - [x] Path parameters (`/users/:id`)
 - [x] HTTP method routing (GET, POST, PUT, DELETE, PATCH)
-- [ ] Route groups with prefix (`/api/v1`)
+- [x] Route groups with prefix (`/api/v1`)
 - [ ] Wildcard/glob routes (`/static/*path`)
 - [ ] Regex route patterns
 - [ ] Route naming and URL generation (reverse routing)
@@ -37,7 +37,7 @@
 ### Built-in Middleware
 - [x] Request logger
 - [x] Panic recovery / error handler
-- [ ] CORS (Cross-Origin Resource Sharing)
+- [x] CORS (Cross-Origin Resource Sharing)
 - [ ] Request ID generation
 - [ ] Request timeout
 - [ ] Rate limiting (token bucket, sliding window)
@@ -58,7 +58,7 @@
 ### Request Parsing
 - [x] Method, target, version, headers
 - [x] Path parameters via `ctx.params.get("id")`
-- [ ] Query parameters (`ctx.query.get("page")`)
+- [x] Query parameters (`ctx.query.get("page")`)
 - [ ] Query string parsing (multi-value, nested)
 - [ ] Form data (URL-encoded, multipart)
 - [x] JSON body (`ctx.readBody()` → raw bytes)
@@ -81,7 +81,7 @@
 - [x] `ctx.json(status, body)`
 - [x] `ctx.html(status, body)`
 - [ ] `ctx.xml(status, body)`
-- [ ] `ctx.redirect(status, url)`
+- [x] `ctx.redirect(status, url)`
 - [ ] `ctx.stream(reader, content_type)` — streaming responses
 - [ ] `ctx.file(path)` — file download
 - [ ] `ctx.attachment(path, filename)` — force download
@@ -89,7 +89,7 @@
 - [ ] `ctx.status(code)` — set status only
 
 ### Serialization
-- [ ] JSON serializer (encode Zig structs to JSON)
+- [x] JSON serializer (encode Zig structs to JSON)
 - [ ] XML serializer
 - [ ] Content negotiation (Accept header → serializer)
 - [ ] Custom serializer per content type
@@ -114,7 +114,7 @@
 
 ## 6. Security
 
-- [ ] CORS middleware (origins, methods, headers, credentials)
+- [x] CORS middleware (origins, methods, headers, credentials)
 - [ ] CSRF token generation & validation
 - [ ] HSTS header
 - [ ] X-Content-Type-Options
