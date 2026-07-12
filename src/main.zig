@@ -29,7 +29,7 @@ pub fn main() !void {
     try api.get("/hello", apiHelloHandler);
 
     const io = std.Io.Threaded.global_single_threaded.io();
-    var server = fw.Server.init(io, &router);
+    var server = try fw.Server.initPool(io, &router, 4);
     try server.listen("0.0.0.0:8080");
 }
 

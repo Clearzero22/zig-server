@@ -132,7 +132,7 @@
 ## 7. Performance & Concurrency
 
 - [x] Thread-per-connection
-- [ ] Thread pool with configurable size
+- [x] Thread pool with configurable size
 - [ ] Connection keep-alive (HTTP persistent connections)
 - [ ] HTTP/2 support
 - [ ] HTTP/3 (QUIC) support

@@ -22,53 +22,50 @@ allocator: std.mem.Allocator,
 request: *http.Server.Request,
 params: Params = .{},
 query: QueryParams = .{},
+cors_origin: ?[]const u8 = null,
 
 pub fn json(ctx: *@This(), status: http.Status, data: []const u8) !void {
-    try ctx.request.respond(data, .{
+    try respondExtra(ctx, data, .{
         .status = status,
         .keep_alive = false,
-        .extra_headers = &.{
-            http.Header{ .name = "content-type", .value = "application/json" },
-        },
+    }, &.{
+        http.Header{ .name = "content-type", .value = "application/json" },
     });
 }
 
 pub fn jsonTyped(ctx: *@This(), allocator: std.mem.Allocator, status: http.Status, value: anytype) !void {
     const data = try std.json.Stringify.valueAlloc(allocator, value, .{});
     defer allocator.free(data);
-    try ctx.request.respond(data, .{
+    try respondExtra(ctx, data, .{
         .status = status,
         .keep_alive = false,
-        .extra_headers = &.{
-            http.Header{ .name = "content-type", .value = "application/json" },
-        },
+    }, &.{
+        http.Header{ .name = "content-type", .value = "application/json" },
     });
 }
 
 pub fn text(ctx: *@This(), status: http.Status, body: []const u8) !void {
-    try ctx.request.respond(body, .{
+    try respondExtra(ctx, body, .{
         .status = status,
         .keep_alive = false,
-    });
+    }, &.{});
 }
 
 pub fn html(ctx: *@This(), status: http.Status, body: []const u8) !void {
-    try ctx.request.respond(body, .{
+    try respondExtra(ctx, body, .{
         .status = status,
         .keep_alive = false,
-        .extra_headers = &.{
-            http.Header{ .name = "content-type", .value = "text/html; charset=utf-8" },
-        },
+    }, &.{
+        http.Header{ .name = "content-type", .value = "text/html; charset=utf-8" },
     });
 }
 
 pub fn internalError(ctx: *@This(), _: anyerror) !void {
-    try ctx.request.respond("{\"error\":\"Internal Server Error\"}", .{
+    try respondExtra(ctx, "{\"error\":\"Internal Server Error\"}", .{
         .status = .internal_server_error,
         .keep_alive = false,
-        .extra_headers = &.{
-            http.Header{ .name = "content-type", .value = "application/json" },
-        },
+    }, &.{
+        http.Header{ .name = "content-type", .value = "application/json" },
     });
 }
 
@@ -84,11 +81,31 @@ pub fn readBody(ctx: *@This()) ![]const u8 {
 }
 
 pub fn redirect(ctx: *@This(), status: http.Status, url: []const u8) !void {
-    try ctx.request.respond("", .{
+    try respondExtra(ctx, "", .{
         .status = status,
         .keep_alive = false,
-        .extra_headers = &.{
-            http.Header{ .name = "location", .value = url },
-        },
+    }, &.{
+        http.Header{ .name = "location", .value = url },
+    });
+}
+
+fn respondExtra(ctx: *@This(), data: []const u8, opts: anytype, extra: []const http.Header) !void {
+    const has_cors = ctx.cors_origin != null;
+    var buf: [8]http.Header = undefined;
+    var n: usize = 0;
+
+    if (has_cors) {
+        buf[n] = .{ .name = "access-control-allow-origin", .value = ctx.cors_origin.? };
+        n += 1;
+    }
+    for (extra) |h| {
+        buf[n] = h;
+        n += 1;
+    }
+
+    try ctx.request.respond(data, .{
+        .status = opts.status,
+        .keep_alive = false,
+        .extra_headers = buf[0..n],
     });
 }
