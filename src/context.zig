@@ -15,11 +15,27 @@ pub const Params = struct {
     }
 };
 
+pub const QueryParams = Params;
+
 io: std.Io,
+allocator: std.mem.Allocator,
 request: *http.Server.Request,
 params: Params = .{},
+query: QueryParams = .{},
 
 pub fn json(ctx: *@This(), status: http.Status, data: []const u8) !void {
+    try ctx.request.respond(data, .{
+        .status = status,
+        .keep_alive = false,
+        .extra_headers = &.{
+            http.Header{ .name = "content-type", .value = "application/json" },
+        },
+    });
+}
+
+pub fn jsonTyped(ctx: *@This(), allocator: std.mem.Allocator, status: http.Status, value: anytype) !void {
+    const data = try std.json.Stringify.valueAlloc(allocator, value, .{});
+    defer allocator.free(data);
     try ctx.request.respond(data, .{
         .status = status,
         .keep_alive = false,
@@ -56,13 +72,23 @@ pub fn internalError(ctx: *@This(), _: anyerror) !void {
     });
 }
 
-pub fn readBody(ctx: *@This(), allocator: std.mem.Allocator) ![]const u8 {
+pub fn readBody(ctx: *@This()) ![]const u8 {
+    const len = ctx.request.head.content_length orelse return error.BodyRequired;
     var transfer_buf: [8192]u8 = undefined;
     const body_reader = ctx.request.server.reader.bodyReader(
         &transfer_buf,
         ctx.request.head.transfer_encoding,
-        ctx.request.head.content_length,
+        len,
     );
-    const len = ctx.request.head.content_length orelse return error.BodyRequired;
-    return try body_reader.readAlloc(allocator, len);
+    return try body_reader.readAlloc(ctx.allocator, len);
+}
+
+pub fn redirect(ctx: *@This(), status: http.Status, url: []const u8) !void {
+    try ctx.request.respond("", .{
+        .status = status,
+        .keep_alive = false,
+        .extra_headers = &.{
+            http.Header{ .name = "location", .value = url },
+        },
+    });
 }

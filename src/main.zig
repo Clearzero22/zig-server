@@ -18,11 +18,15 @@ pub fn main() !void {
 
     try router.get("/", helloHandler);
     try router.get("/json", jsonHandler);
+    try router.get("/search", searchHandler);
     try router.get("/admin", adminHandler);
     try router.get("/users/:id", userHandler);
     try router.get("/users/:id/posts/:pid", postHandler);
     try router.post("/echo", echoHandler);
     try router.get("/error", errorHandler);
+
+    var api = router.group("/api/v1");
+    try api.get("/hello", apiHelloHandler);
 
     const io = std.Io.Threaded.global_single_threaded.io();
     var server = fw.Server.init(io, &router);
@@ -45,26 +49,39 @@ fn jsonHandler(ctx: *fw.Context) !void {
     try ctx.json(.ok, "{\"message\": \"Hello, JSON!\"}");
 }
 
+fn searchHandler(ctx: *fw.Context) !void {
+    const q = ctx.query.get("q") orelse "";
+    try ctx.jsonTyped(ctx.allocator, .ok, .{
+        .query = q,
+        .results = [_]u8{},
+    });
+}
+
 fn adminHandler(ctx: *fw.Context) !void {
     try ctx.text(.ok, "Admin Panel");
 }
 
 fn userHandler(ctx: *fw.Context) !void {
     const id = ctx.params.get("id") orelse "unknown";
-    try ctx.json(.ok, try std.fmt.allocPrint(std.heap.page_allocator, "{{\"id\": \"{s}\"}}", .{id}));
+    try ctx.jsonTyped(ctx.allocator, .ok, .{ .id = id });
 }
 
 fn postHandler(ctx: *fw.Context) !void {
     const id = ctx.params.get("id") orelse "unknown";
     const pid = ctx.params.get("pid") orelse "unknown";
-    try ctx.json(.ok, try std.fmt.allocPrint(std.heap.page_allocator, "{{\"id\": \"{s}\", \"pid\": \"{s}\"}}", .{ id, pid }));
+    try ctx.jsonTyped(ctx.allocator, .ok, .{ .id = id, .pid = pid });
 }
 
 fn echoHandler(ctx: *fw.Context) !void {
-    const body = try ctx.readBody(std.heap.page_allocator);
+    const body = try ctx.readBody();
+    defer ctx.allocator.free(body);
     try ctx.json(.ok, body);
 }
 
 fn errorHandler(_: *fw.Context) !void {
     return error.SomethingBad;
+}
+
+fn apiHelloHandler(ctx: *fw.Context) !void {
+    try ctx.json(.ok, "{\"version\":\"v1\"}");
 }

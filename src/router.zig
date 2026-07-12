@@ -2,6 +2,8 @@ const std = @import("std");
 const Context = @import("context.zig");
 const Middleware = @import("middleware.zig").Middleware;
 
+pub const Router = @This();
+
 allocator: std.mem.Allocator,
 routes: std.ArrayList(Route),
 middleware: std.ArrayList(Middleware),
@@ -45,6 +47,9 @@ pub fn init(allocator: std.mem.Allocator) @This() {
 }
 
 pub fn deinit(self: *@This()) void {
+    for (self.routes.items) |route| {
+        self.allocator.free(route.path);
+    }
     self.routes.deinit(self.allocator);
     self.middleware.deinit(self.allocator);
 }
@@ -58,19 +63,70 @@ pub fn onError(self: *@This(), handler: Handler) void {
 }
 
 pub fn get(self: *@This(), path: []const u8, handler: Handler) !void {
-    try self.routes.append(self.allocator, .{ .method = .GET, .path = path, .handler = handler });
+    try self.routes.append(self.allocator, .{ .method = .GET, .path = try self.allocator.dupe(u8, path), .handler = handler });
 }
 
 pub fn post(self: *@This(), path: []const u8, handler: Handler) !void {
-    try self.routes.append(self.allocator, .{ .method = .POST, .path = path, .handler = handler });
+    try self.routes.append(self.allocator, .{ .method = .POST, .path = try self.allocator.dupe(u8, path), .handler = handler });
 }
 
 pub fn put(self: *@This(), path: []const u8, handler: Handler) !void {
-    try self.routes.append(self.allocator, .{ .method = .PUT, .path = path, .handler = handler });
+    try self.routes.append(self.allocator, .{ .method = .PUT, .path = try self.allocator.dupe(u8, path), .handler = handler });
 }
 
 pub fn delete(self: *@This(), path: []const u8, handler: Handler) !void {
-    try self.routes.append(self.allocator, .{ .method = .DELETE, .path = path, .handler = handler });
+    try self.routes.append(self.allocator, .{ .method = .DELETE, .path = try self.allocator.dupe(u8, path), .handler = handler });
+}
+
+pub fn patch(self: *@This(), path: []const u8, handler: Handler) !void {
+    try self.routes.append(self.allocator, .{ .method = .PATCH, .path = try self.allocator.dupe(u8, path), .handler = handler });
+}
+
+pub const Group = struct {
+    router: *Router,
+    prefix: []const u8,
+
+    pub fn get(self: *Group, path: []const u8, handler: Handler) !void {
+        const full = try concat(self.router.allocator, self.prefix, path);
+        try self.router.routes.append(self.router.allocator, .{ .method = .GET, .path = full, .handler = handler });
+    }
+
+    pub fn post(self: *Group, path: []const u8, handler: Handler) !void {
+        const full = try concat(self.router.allocator, self.prefix, path);
+        try self.router.routes.append(self.router.allocator, .{ .method = .POST, .path = full, .handler = handler });
+    }
+
+    pub fn put(self: *Group, path: []const u8, handler: Handler) !void {
+        const full = try concat(self.router.allocator, self.prefix, path);
+        try self.router.routes.append(self.router.allocator, .{ .method = .PUT, .path = full, .handler = handler });
+    }
+
+    pub fn delete(self: *Group, path: []const u8, handler: Handler) !void {
+        const full = try concat(self.router.allocator, self.prefix, path);
+        try self.router.routes.append(self.router.allocator, .{ .method = .DELETE, .path = full, .handler = handler });
+    }
+
+    pub fn patch(self: *Group, path: []const u8, handler: Handler) !void {
+        const full = try concat(self.router.allocator, self.prefix, path);
+        try self.router.routes.append(self.router.allocator, .{ .method = .PATCH, .path = full, .handler = handler });
+    }
+};
+
+pub fn group(self: *@This(), prefix: []const u8) Group {
+    return .{ .router = self, .prefix = prefix };
+}
+
+fn concat(allocator: std.mem.Allocator, prefix: []const u8, path: []const u8) ![]const u8 {
+    if (std.mem.endsWith(u8, prefix, "/")) {
+        return if (std.mem.startsWith(u8, path, "/"))
+            try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, path[1..] })
+        else
+            try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, path });
+    }
+    return if (std.mem.startsWith(u8, path, "/"))
+        try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, path })
+    else
+        try std.fmt.allocPrint(allocator, "{s}/{s}", .{ prefix, path });
 }
 
 pub fn match(self: *@This(), method: Method, target: []const u8) ?MatchResult {
