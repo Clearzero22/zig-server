@@ -10,6 +10,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    _ = b.addModule("zig-server", .{
+        .root_source_file = b.path("src/framework.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const lib = b.addLibrary(.{
         .linkage = .static,
         .name = "zig-server",
