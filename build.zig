@@ -73,6 +73,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "ex-db",            .path = "examples/14_db.zig",              .needs_sqlite = true },
         .{ .name = "ex-server",        .path = "examples/15_server.zig",          .needs_sqlite = false },
         .{ .name = "ex-cookies-form",  .path = "examples/16_cookies_form.zig",   .needs_sqlite = false },
+        .{ .name = "ex-benchmark",    .path = "examples/20_benchmark.zig",      .needs_sqlite = false },
     };
     inline for (examples) |ex| {
         const ex_mod = b.createModule(.{
@@ -94,6 +95,21 @@ pub fn build(b: *std.Build) void {
         const step = b.step(ex.name, "Run " ++ ex.path);
         step.dependOn(&run_ex.step);
     }
+
+    const ben_mod = b.createModule(.{
+        .root_source_file = b.path("bench/route_bench.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    ben_mod.addImport("zig-server", lib_mod);
+    const ben_exe = b.addExecutable(.{
+        .name = "route-bench",
+        .root_module = ben_mod,
+    });
+    b.installArtifact(ben_exe);
+    const run_ben = b.addRunArtifact(ben_exe);
+    const ben_step = b.step("bench-route", "Run routing microbenchmark");
+    ben_step.dependOn(&run_ben.step);
 
     const test_mod = b.createModule(.{
         .root_source_file = b.path("src/test.zig"),
