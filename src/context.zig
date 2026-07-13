@@ -50,6 +50,12 @@ pub const FormData = struct {
     }
 };
 
+pub const ResponseCapture = struct {
+    data: std.ArrayList(u8),
+    status: http.Status = .ok,
+    content_type: ?[]const u8 = null,
+};
+
 io: std.Io,
 allocator: std.mem.Allocator,
 request: *http.Server.Request,
@@ -62,6 +68,9 @@ extra_header_buf: [8]http.Header = undefined,
 extra_header_count: usize = 0,
 request_id: ?[]const u8 = null,
 deadline: i64 = 0,
+_conn: ?std.Io.net.Stream = null,
+conn_taken: bool = false,
+response_capture: ?ResponseCapture = null,
 
 pub fn cookie(ctx: *@This(), name: []const u8) ?[]const u8 {
     var it = http.HeaderIterator.init(ctx.request.head_buffer);
@@ -421,7 +430,59 @@ pub fn header(ctx: *@This(), name: []const u8, value: []const u8) !void {
     ctx.extra_header_count += 1;
 }
 
+pub fn upgradeToWebSocket(ctx: *@This()) !WebSocket {
+    return @import("builtins/websocket.zig").upgrade(ctx);
+}
+
+pub fn gzipText(ctx: *@This(), status: http.Status, body: []const u8) !void {
+    const compressed = try @import("builtins/compression.zig").gzipCompress(ctx.allocator, body);
+    defer ctx.allocator.free(compressed);
+    try respondExtra(ctx, compressed, .{
+        .status = status,
+        .keep_alive = ctx.request.head.keep_alive,
+    }, &.{
+        http.Header{ .name = "content-encoding", .value = "gzip" },
+    });
+}
+
+pub fn gzipJson(ctx: *@This(), status: http.Status, data: []const u8) !void {
+    const compressed = try @import("builtins/compression.zig").gzipCompress(ctx.allocator, data);
+    defer ctx.allocator.free(compressed);
+    try respondExtra(ctx, compressed, .{
+        .status = status,
+        .keep_alive = ctx.request.head.keep_alive,
+    }, &.{
+        http.Header{ .name = "content-encoding", .value = "gzip" },
+        http.Header{ .name = "content-type", .value = "application/json" },
+    });
+}
+
+pub fn gzipHtml(ctx: *@This(), status: http.Status, body: []const u8) !void {
+    const compressed = try @import("builtins/compression.zig").gzipCompress(ctx.allocator, body);
+    defer ctx.allocator.free(compressed);
+    try respondExtra(ctx, compressed, .{
+        .status = status,
+        .keep_alive = ctx.request.head.keep_alive,
+    }, &.{
+        http.Header{ .name = "content-encoding", .value = "gzip" },
+        http.Header{ .name = "content-type", .value = "text/html; charset=utf-8" },
+    });
+}
+
+pub const WebSocket = @import("builtins/websocket.zig").WebSocket;
+
 fn respondExtra(ctx: *@This(), data: []const u8, opts: anytype, extra: []const http.Header) !void {
+    if (ctx.response_capture) |*rc| {
+        try rc.data.appendSlice(ctx.allocator, data);
+        rc.status = opts.status;
+        for (extra) |h| {
+            if (std.ascii.eqlIgnoreCase(h.name, "content-type")) {
+                rc.content_type = h.value;
+            }
+        }
+        return;
+    }
+
     const has_cors = ctx.cors_origin != null;
     var buf: [32]http.Header = undefined;
     var n: usize = 0;

@@ -23,3 +23,5 @@ pub const request_timeout = @import("builtins/request_timeout.zig");
 pub const db = @import("builtins/db/sqlite.zig");
 pub const env = @import("builtins/env.zig");
 pub const static_files = @import("builtins/static.zig");
+pub const websocket = @import("builtins/websocket.zig");
+pub const compression = @import("builtins/compression.zig");

@@ -40,8 +40,6 @@ fn rateLimitCheck(ctx: *Context, config: Router.RateLimitConfig) !void {
 }
 
 pub fn handleConnection(io: std.Io, router: *Router, conn: std.Io.net.Stream) void {
-    defer conn.close(io);
-
     var read_buf: [8192]u8 = undefined;
     var write_buf: [4096]u8 = undefined;
 
@@ -50,17 +48,25 @@ pub fn handleConnection(io: std.Io, router: *Router, conn: std.Io.net.Stream) vo
 
     var http_server = std.http.Server.init(&reader.interface, &writer.interface);
 
+    var conn_taken = false;
     while (true) {
-        var request = http_server.receiveHead() catch return;
+        var request = http_server.receiveHead() catch break;
 
         var ctx = Context{
             .io = io,
             .allocator = router.allocator,
             .request = &request,
+            ._conn = conn,
         };
 
         dispatch(&ctx, router);
+
+        if (ctx.conn_taken) {
+            conn_taken = true;
+            break;
+        }
     }
+    if (!conn_taken) conn.close(io);
 }
 
 pub fn dispatch(ctx: *Context, router: *Router) void {
