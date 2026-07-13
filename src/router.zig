@@ -53,6 +53,7 @@ pub const RouteOptions = struct {
     host: ?[]const u8 = null,
     headers: ?[]const HeaderMatch = null,
     middleware: ?[]const Middleware = null,
+    after_middleware: ?[]const AfterMiddleware = null,
     cors_origin: ?[]const u8 = null,
     rate_limit: ?RateLimitConfig = null,
 
@@ -88,6 +89,7 @@ pub const Route = struct {
     host: ?[]const u8 = null,
     headers: ?[]const HeaderMatch = null,
     middleware: []const Middleware = &.{},
+    after_middleware: []const AfterMiddleware = &.{},
     cors_origin: ?[]const u8 = null,
     rate_limit: ?RateLimitConfig = null,
     has_wildcard: bool = false,
@@ -104,6 +106,7 @@ pub const MatchResult = struct {
     handler: Handler,
     params: Context.Params,
     middleware: []const Middleware = &.{},
+    after_middleware: []const AfterMiddleware = &.{},
     cors_origin: ?[]const u8 = null,
     rate_limit: ?RateLimitConfig = null,
 };
@@ -133,6 +136,7 @@ pub fn deinit(self: *@This()) void {
             self.allocator.free(hdrs);
         }
         if (route.middleware.len > 0) self.allocator.free(route.middleware);
+        if (route.after_middleware.len > 0) self.allocator.free(route.after_middleware);
         if (route.cors_origin) |c| self.allocator.free(c);
         for (route.segments) |seg| {
             if (seg == .multi_param) {
@@ -201,6 +205,10 @@ fn addRoute(self: *@This(), method: Method, path: []const u8, handler: Handler, 
         break :blk try self.allocator.dupe(Middleware, mw);
     } else null;
 
+    const amw_dup = if (opts.after_middleware) |amw| blk: {
+        break :blk try self.allocator.dupe(AfterMiddleware, amw);
+    } else null;
+
     try self.routes.append(self.allocator, .{
         .method = method,
         .path = path,
@@ -210,6 +218,7 @@ fn addRoute(self: *@This(), method: Method, path: []const u8, handler: Handler, 
         .host = if (opts.host) |h| try self.allocator.dupe(u8, h) else null,
         .headers = hdrs_dup,
         .middleware = if (mw_dup) |m| m else &.{},
+        .after_middleware = if (amw_dup) |a| a else &.{},
         .cors_origin = if (opts.cors_origin) |c| try self.allocator.dupe(u8, c) else null,
         .rate_limit = opts.rate_limit,
         .has_wildcard = has_wc,
@@ -420,6 +429,7 @@ pub fn match(self: *@This(), method: Method, target: []const u8) ?MatchResult {
                 .handler = route.handler,
                 .params = params,
                 .middleware = route.middleware,
+                .after_middleware = route.after_middleware,
                 .cors_origin = route.cors_origin,
                 .rate_limit = route.rate_limit,
             };
@@ -610,75 +620,119 @@ pub const Group = struct {
     router: *Router,
     prefix: []const u8,
     middleware: std.ArrayList(Middleware) = .empty,
+    after_middleware: std.ArrayList(AfterMiddleware) = .empty,
+
+    pub fn deinit(self: *Group) void {
+        self.middleware.deinit(self.router.allocator);
+        self.after_middleware.deinit(self.router.allocator);
+    }
 
     pub fn use(self: *Group, mw: Middleware) !void {
         try self.middleware.append(self.router.allocator, mw);
+    }
+
+    pub fn after(self: *Group, mw: AfterMiddleware) !void {
+        try self.after_middleware.append(self.router.allocator, mw);
     }
 
     fn mwArg(self: *Group) ?[]const Middleware {
         return if (self.middleware.items.len > 0) self.middleware.items else null;
     }
 
-    fn mergeOpts(self: *Group, opts: RouteOptions) RouteOptions {
+    fn amwArg(self: *Group) ?[]const AfterMiddleware {
+        return if (self.after_middleware.items.len > 0) self.after_middleware.items else null;
+    }
+
+    fn mergeOpts(self: *Group, opts: RouteOptions) !RouteOptions {
         const gmw = self.middleware.items;
-        if (gmw.len == 0) return opts;
-        if (opts.middleware) |omw| {
-            var buf: [32]Middleware = undefined;
-            @memcpy(buf[0..gmw.len], gmw);
-            @memcpy(buf[gmw.len..][0..omw.len], omw);
-            return .{ .middleware = buf[0..gmw.len + omw.len] };
+        const gamw = self.after_middleware.items;
+        var result = opts;
+        if (gmw.len > 0) {
+            if (opts.middleware) |omw| {
+                const merged = try self.router.allocator.alloc(Middleware, gmw.len + omw.len);
+                @memcpy(merged[0..gmw.len], gmw);
+                @memcpy(merged[gmw.len..], omw);
+                result.middleware = merged;
+            } else {
+                result.middleware = gmw;
+            }
         }
-        return .{ .middleware = gmw };
+        if (gamw.len > 0) {
+            if (opts.after_middleware) |oamw| {
+                const merged = try self.router.allocator.alloc(AfterMiddleware, gamw.len + oamw.len);
+                @memcpy(merged[0..gamw.len], gamw);
+                @memcpy(merged[gamw.len..], oamw);
+                result.after_middleware = merged;
+            } else {
+                result.after_middleware = gamw;
+            }
+        }
+        return result;
     }
 
     pub fn get(self: *Group, path: []const u8, handler: Handler) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.GET, full, handler, .{ .middleware = self.mwArg() });
+        try self.router.addRoute(.GET, full, handler, .{
+            .middleware = self.mwArg(),
+            .after_middleware = self.amwArg(),
+        });
     }
 
     pub fn post(self: *Group, path: []const u8, handler: Handler) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.POST, full, handler, .{ .middleware = self.mwArg() });
+        try self.router.addRoute(.POST, full, handler, .{
+            .middleware = self.mwArg(),
+            .after_middleware = self.amwArg(),
+        });
     }
 
     pub fn put(self: *Group, path: []const u8, handler: Handler) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.PUT, full, handler, .{ .middleware = self.mwArg() });
+        try self.router.addRoute(.PUT, full, handler, .{
+            .middleware = self.mwArg(),
+            .after_middleware = self.amwArg(),
+        });
     }
 
     pub fn delete(self: *Group, path: []const u8, handler: Handler) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.DELETE, full, handler, .{ .middleware = self.mwArg() });
+        try self.router.addRoute(.DELETE, full, handler, .{
+            .middleware = self.mwArg(),
+            .after_middleware = self.amwArg(),
+        });
     }
 
     pub fn patch(self: *Group, path: []const u8, handler: Handler) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.PATCH, full, handler, .{ .middleware = self.mwArg() });
+        try self.router.addRoute(.PATCH, full, handler, .{
+            .middleware = self.mwArg(),
+            .after_middleware = self.amwArg(),
+        });
     }
 
     pub fn getOpts(self: *Group, path: []const u8, handler: Handler, opts: RouteOptions) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.GET, full, handler, self.mergeOpts(opts));
+        try self.router.addRoute(.GET, full, handler, try self.mergeOpts(opts));
     }
 
     pub fn postOpts(self: *Group, path: []const u8, handler: Handler, opts: RouteOptions) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.POST, full, handler, self.mergeOpts(opts));
+        try self.router.addRoute(.POST, full, handler, try self.mergeOpts(opts));
     }
 
     pub fn putOpts(self: *Group, path: []const u8, handler: Handler, opts: RouteOptions) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.PUT, full, handler, self.mergeOpts(opts));
+        try self.router.addRoute(.PUT, full, handler, try self.mergeOpts(opts));
     }
 
     pub fn deleteOpts(self: *Group, path: []const u8, handler: Handler, opts: RouteOptions) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.DELETE, full, handler, self.mergeOpts(opts));
+        try self.router.addRoute(.DELETE, full, handler, try self.mergeOpts(opts));
     }
 
     pub fn patchOpts(self: *Group, path: []const u8, handler: Handler, opts: RouteOptions) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.PATCH, full, handler, self.mergeOpts(opts));
+        try self.router.addRoute(.PATCH, full, handler, try self.mergeOpts(opts));
     }
 };
 
@@ -698,6 +752,8 @@ pub fn mount(self: *@This(), prefix: []const u8, sub: *@This()) !void {
             for (route.middleware) |mw| { mw_slice[idx] = mw; idx += 1; }
             break :blk mw_slice;
         } else &.{};
+        const amw_total = route.after_middleware.len;
+        const amw_final = if (amw_total > 0) try self.allocator.dupe(AfterMiddleware, route.after_middleware) else &.{};
         const segs = try parseSegments(self.allocator, full);
         const hdrs_dup: ?[]HeaderMatch = null;
         try self.routes.append(self.allocator, .{
@@ -709,6 +765,7 @@ pub fn mount(self: *@This(), prefix: []const u8, sub: *@This()) !void {
             .host = null,
             .headers = hdrs_dup,
             .middleware = mw_final,
+            .after_middleware = amw_final,
             .cors_origin = null,
             .rate_limit = route.rate_limit,
             .has_wildcard = route.has_wildcard,

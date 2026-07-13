@@ -1,7 +1,14 @@
 const std = @import("std");
 const Context = @import("context.zig");
 const Router = @import("router.zig");
-const AfterMiddleware = @import("middleware.zig").AfterMiddleware;
+
+fn milliTimestamp() i64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts);
+    const sec: i64 = @intCast(ts.sec);
+    const nsec: i64 = @intCast(ts.nsec);
+    return sec * 1000 + @divTrunc(nsec, 1000000);
+}
 
 var rate_counters: ?*std.StringHashMap(u32) = null;
 var rate_alloc: ?std.mem.Allocator = null;
@@ -104,9 +111,17 @@ pub fn dispatchInner(ctx: *Context, router: *Router) !void {
         try rateLimitCheck(ctx, rl);
     }
 
+    if (ctx.deadline > 0 and milliTimestamp() > ctx.deadline) {
+        try ctx.text(.request_timeout, "Request Timeout");
+        return;
+    }
+
     {
         defer {
             for (router.after_middleware.items) |mw| {
+                mw(ctx);
+            }
+            for (match_result.after_middleware) |mw| {
                 mw(ctx);
             }
         }

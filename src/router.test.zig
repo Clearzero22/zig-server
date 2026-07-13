@@ -1,6 +1,9 @@
 const std = @import("std");
 const Router = @import("router.zig");
 const Context = @import("context.zig");
+const secure_headers = @import("builtins/secure_headers.zig");
+const request_id = @import("builtins/request_id.zig");
+const request_timeout = @import("builtins/request_timeout.zig");
 
 test "router: static path match" {
     var router = Router.init(std.testing.allocator);
@@ -88,6 +91,7 @@ test "router: group prefix" {
     defer router.deinit();
 
     var api = router.group("/api");
+    defer api.deinit();
     try api.get("/users", struct {
         fn h(_: *Context) !void {}
     }.h);
@@ -105,6 +109,7 @@ test "router: group all methods" {
     defer router.deinit();
 
     var g = router.group("/prefix");
+    defer g.deinit();
     try g.get("/get", struct { fn h(_: *Context) !void {} }.h);
     try g.post("/post", struct { fn h(_: *Context) !void {} }.h);
     try g.put("/put", struct { fn h(_: *Context) !void {} }.h);
@@ -648,13 +653,135 @@ test "router: version prefix via group" {
 
     const H = struct { fn h(_: *Context) !void {} };
     var v1 = router.group("/v1");
+    defer v1.deinit();
     try v1.get("/users", H.h);
 
     var v2 = router.group("/v2");
+    defer v2.deinit();
     try v2.get("/users", H.h);
     router.lock();
 
     try std.testing.expect(router.match(.GET, "/v1/users") != null);
     try std.testing.expect(router.match(.GET, "/v2/users") != null);
     try std.testing.expect(router.match(.GET, "/v1/users/x") == null);
+}
+
+var after_mw_ran: bool = false;
+fn afterMw(_: *Context) void {
+    after_mw_ran = true;
+}
+
+test "router: router-level after middleware" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    try router.after(afterMw);
+    try std.testing.expectEqual(@as(usize, 1), router.after_middleware.items.len);
+}
+
+test "router: route-level after middleware" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    after_mw_ran = false;
+    const H = struct { fn h(_: *Context) !void {} };
+
+    try router.getOpts("/test", H.h, .{
+        .after_middleware = &.{afterMw},
+    });
+    router.lock();
+
+    const r = router.match(.GET, "/test");
+    try std.testing.expect(r != null);
+    try std.testing.expectEqual(@as(usize, 1), r.?.after_middleware.len);
+    var ctx = Context{ .io = undefined, .allocator = std.testing.allocator, .request = undefined };
+    r.?.after_middleware[0](&ctx);
+    try std.testing.expect(after_mw_ran);
+}
+
+test "router: group-level after middleware" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    const H = struct { fn h(_: *Context) !void {} };
+    var g = router.group("/api");
+    defer g.deinit();
+    try g.after(afterMw);
+    try g.get("/users", H.h);
+    router.lock();
+
+    const r = router.match(.GET, "/api/users");
+    try std.testing.expect(r != null);
+    try std.testing.expectEqual(@as(usize, 1), r.?.after_middleware.len);
+}
+
+test "router: group-level middleware" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    const H = struct { fn h(_: *Context) !void {} };
+    const GMw = struct { fn mw(_: *Context) anyerror!bool { return true; } };
+
+    var g = router.group("/api");
+    defer g.deinit();
+    try g.use(GMw.mw);
+    try g.get("/items", H.h);
+    router.lock();
+
+    const r = router.match(.GET, "/api/items");
+    try std.testing.expect(r != null);
+    try std.testing.expectEqual(@as(usize, 1), r.?.middleware.len);
+}
+
+test "router: mount copies after middleware" {
+    var sub = Router.init(std.testing.allocator);
+    defer sub.deinit();
+
+    const H = struct { fn h(_: *Context) !void {} };
+    try sub.getOpts("/hello", H.h, .{
+        .after_middleware = &.{afterMw},
+    });
+
+    var parent = Router.init(std.testing.allocator);
+    defer parent.deinit();
+
+    try parent.mount("/api", &sub);
+
+    const r = parent.match(.GET, "/api/hello");
+    try std.testing.expect(r != null);
+    try std.testing.expectEqual(@as(usize, 1), r.?.after_middleware.len);
+}
+
+test "router: secure_headers middleware" {
+    var ctx = Context{
+        .io = undefined,
+        .allocator = std.testing.allocator,
+        .request = undefined,
+    };
+    secure_headers.init(.{});
+    try std.testing.expect(try secure_headers.handler(&ctx));
+    try std.testing.expect(ctx.extra_header_count > 0);
+}
+
+test "router: request_id middleware" {
+    var ctx = Context{
+        .io = undefined,
+        .allocator = std.testing.allocator,
+        .request = undefined,
+    };
+    request_id.init(.{});
+    try std.testing.expect(try request_id.handler(&ctx));
+    try std.testing.expect(ctx.request_id != null);
+    if (ctx.request_id) |id| ctx.allocator.free(id);
+}
+
+test "router: request_timeout middleware" {
+    var ctx = Context{
+        .io = undefined,
+        .allocator = std.testing.allocator,
+        .request = undefined,
+    };
+    request_timeout.init(.{ .timeout_ms = 5000 });
+    try std.testing.expect(try request_timeout.handler(&ctx));
+    try std.testing.expect(ctx.deadline > 0);
 }

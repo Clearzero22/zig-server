@@ -27,6 +27,10 @@ query: QueryParams = .{},
 cors_origin: ?[]const u8 = null,
 max_body_size: usize = 10 * 1024 * 1024,
 db: ?*anyopaque = null,
+extra_header_buf: [8]http.Header = undefined,
+extra_header_count: usize = 0,
+request_id: ?[]const u8 = null,
+deadline: i64 = 0,
 
 pub fn json(ctx: *@This(), status: http.Status, data: []const u8) !void {
     try respondExtra(ctx, data, .{
@@ -85,6 +89,12 @@ pub fn readBody(ctx: *@This()) ![]const u8 {
     return try body_reader.readAlloc(ctx.allocator, len);
 }
 
+pub fn readJson(ctx: *@This(), comptime T: type) !T {
+    const body = try ctx.readBody();
+    defer ctx.allocator.free(body);
+    return try std.json.parseFromSliceLeaky(T, ctx.allocator, body, .{});
+}
+
 pub fn redirect(ctx: *@This(), status: http.Status, url: []const u8) !void {
     try respondExtra(ctx, "", .{
         .status = status,
@@ -94,13 +104,30 @@ pub fn redirect(ctx: *@This(), status: http.Status, url: []const u8) !void {
     });
 }
 
+pub fn noContent(ctx: *@This()) !void {
+    try respondExtra(ctx, "", .{
+        .status = .no_content,
+        .keep_alive = false,
+    }, &.{});
+}
+
+pub fn header(ctx: *@This(), name: []const u8, value: []const u8) !void {
+    if (ctx.extra_header_count >= 8) return error.TooManyHeaders;
+    ctx.extra_header_buf[ctx.extra_header_count] = .{ .name = name, .value = value };
+    ctx.extra_header_count += 1;
+}
+
 fn respondExtra(ctx: *@This(), data: []const u8, opts: anytype, extra: []const http.Header) !void {
     const has_cors = ctx.cors_origin != null;
-    var buf: [24]http.Header = undefined;
+    var buf: [32]http.Header = undefined;
     var n: usize = 0;
 
     if (has_cors) {
         buf[n] = .{ .name = "access-control-allow-origin", .value = ctx.cors_origin.? };
+        n += 1;
+    }
+    for (ctx.extra_header_buf[0..ctx.extra_header_count]) |h| {
+        buf[n] = h;
         n += 1;
     }
     for (extra) |h| {

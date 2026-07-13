@@ -107,6 +107,34 @@ test "context: MAX_PARAMS constant value" {
     try std.testing.expectEqual(@as(usize, 16), Context.MAX_PARAMS);
 }
 
+test "context: header stores extra headers" {
+    var ctx = Context{
+        .io = undefined,
+        .allocator = std.testing.allocator,
+        .request = undefined,
+    };
+    try ctx.header("x-custom", "value1");
+    try ctx.header("x-other", "value2");
+    try std.testing.expectEqual(@as(usize, 2), ctx.extra_header_count);
+    try std.testing.expectEqualStrings("x-custom", ctx.extra_header_buf[0].name);
+    try std.testing.expectEqualStrings("value1", ctx.extra_header_buf[0].value);
+    try std.testing.expectEqualStrings("x-other", ctx.extra_header_buf[1].name);
+    try std.testing.expectEqualStrings("value2", ctx.extra_header_buf[1].value);
+}
+
+test "context: header overflow" {
+    var ctx = Context{
+        .io = undefined,
+        .allocator = std.testing.allocator,
+        .request = undefined,
+    };
+    var i: usize = 0;
+    while (i < 8) : (i += 1) {
+        try ctx.header("h", "v");
+    }
+    try std.testing.expectError(error.TooManyHeaders, ctx.header("overflow", "bad"));
+}
+
 fn parseQueryTest(target: []const u8, query: *Context.QueryParams) void {
     const qs = if (std.mem.indexOfScalar(u8, target, '?')) |i| target[i + 1 ..] else return;
     var it = std.mem.splitScalar(u8, qs, '&');
