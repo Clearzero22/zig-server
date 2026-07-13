@@ -53,7 +53,8 @@ pub fn main() !void {
 const User = struct { id: i64, name: []const u8, email: []const u8 };
 
 fn auth(ctx: *fw.Context) !bool {
-    if (std.mem.startsWith(u8, ctx.request.head.target, "/admin")) {
+    const target = ctx.request.head.target;
+    if (std.mem.startsWith(u8, target, "/admin") or std.mem.startsWith(u8, target, "/db/")) {
         try ctx.text(.forbidden, "Forbidden");
         return false;
     }
@@ -101,17 +102,17 @@ fn errorHandler(_: *fw.Context) !void {
     return error.SomethingBad;
 }
 
-fn getDb(ctx: *fw.Context) *sqlite.Db {
-    return @as(*sqlite.Db, @ptrCast(@alignCast(ctx.db orelse @panic("db not set"))));
+fn getDb(ctx: *fw.Context) !*sqlite.Db {
+    return @as(*sqlite.Db, @ptrCast(@alignCast(ctx.db orelse return error.DBNotSet)));
 }
 
 fn dbInitHandler(c: *fw.Context) !void {
-    try getDb(c).exec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL)", .{}, .{});
+    try (try getDb(c)).exec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL)", .{}, .{});
     try c.json(.ok, "{\"status\":\"ok\",\"table\":\"users\"}");
 }
 
 fn dbListHandler(c: *fw.Context) !void {
-    const d = getDb(c);
+    const d = try getDb(c);
     var stmt = try d.prepare("SELECT id, name, email FROM users");
     defer stmt.deinit();
     const rows = try stmt.all(User, c.allocator, .{}, .{});
@@ -127,7 +128,7 @@ fn dbGetHandler(c: *fw.Context) !void {
         try c.text(.bad_request, "invalid id");
         return;
     };
-    var stmt = try getDb(c).prepare("SELECT id, name, email FROM users WHERE id = ?");
+    var stmt = try (try getDb(c)).prepare("SELECT id, name, email FROM users WHERE id = ?");
     defer stmt.deinit();
     const row = try stmt.oneAlloc(User, c.allocator, .{}, .{ .id = id });
     if (row) |r| {
@@ -171,7 +172,33 @@ fn dbCreateHandler(c: *fw.Context) !void {
             return;
         },
     };
-    try getDb(c).exec("INSERT INTO users (name, email) VALUES (?, ?)", .{}, .{ .name = name, .email = email });
+    if (name.len == 0) {
+        try c.text(.bad_request, "name cannot be empty");
+        return;
+    }
+    if (email.len == 0) {
+        try c.text(.bad_request, "email cannot be empty");
+        return;
+    }
+    if (name.len > 255) {
+        try c.text(.bad_request, "name too long");
+        return;
+    }
+    if (email.len > 255) {
+        try c.text(.bad_request, "email too long");
+        return;
+    }
+    (try getDb(c)).exec("INSERT INTO users (name, email) VALUES (?, ?)", .{}, .{ .name = name, .email = email }) catch |err| switch (err) {
+        error.SQLiteConstraint => {
+            try c.text(.conflict, "duplicate entry");
+            return;
+        },
+        error.SQLiteError => {
+            try c.text(.bad_request, "database error");
+            return;
+        },
+        else => return err,
+    };
     try c.json(.created, "{\"status\":\"created\"}");
 }
 
