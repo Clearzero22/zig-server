@@ -1,5 +1,6 @@
 const std = @import("std");
 const fw = @import("framework.zig");
+const sqlite = @import("sqlite");
 const logger = @import("builtins/logger.zig");
 const recovery = @import("builtins/recovery.zig");
 const swagger = @import("builtins/swagger.zig");
@@ -11,6 +12,9 @@ pub fn main() !void {
 
     var router = fw.Router.init(allocator);
     defer router.deinit();
+
+    var db = try fw.db.init("app.db");
+    router.db = @ptrCast(&db);
 
     try router.setOpenApiInfo("Zig Server API", "1.0.0", "A Zig web framework example");
 
@@ -27,6 +31,11 @@ pub fn main() !void {
     try router.get("/users/:id/posts/:pid", postHandler);
     try router.post("/echo", echoHandler);
     try router.get("/error", errorHandler);
+
+    try router.get("/db/init", dbInitHandler);
+    try router.get("/db/users", dbListHandler);
+    try router.get("/db/users/:id", dbGetHandler);
+    try router.post("/db/users", dbCreateHandler);
 
     var api = router.group("/api/v1");
     try api.get("/hello", apiHelloHandler);
@@ -87,6 +96,64 @@ fn echoHandler(ctx: *fw.Context) !void {
 
 fn errorHandler(_: *fw.Context) !void {
     return error.SomethingBad;
+}
+
+fn getDb(ctx: *fw.Context) *sqlite.Db {
+    return @as(*sqlite.Db, @ptrCast(@alignCast(ctx.db orelse @panic("db not set"))));
+}
+
+fn dbInitHandler(c: *fw.Context) !void {
+    try getDb(c).exec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL)", .{}, .{});
+    try c.json(.ok, "{\"status\":\"ok\",\"table\":\"users\"}");
+}
+
+fn dbListHandler(c: *fw.Context) !void {
+    const d = getDb(c);
+    var stmt = try d.prepare("SELECT id, name, email FROM users");
+    defer stmt.deinit();
+    const rows = try stmt.all(struct { id: i64, name: []const u8, email: []const u8 }, c.allocator, .{}, .{});
+    try c.jsonTyped(c.allocator, .ok, rows);
+}
+
+fn dbGetHandler(c: *fw.Context) !void {
+    const id_str = c.params.get("id") orelse {
+        try c.text(.bad_request, "missing id");
+        return;
+    };
+    const id = std.fmt.parseInt(i64, id_str, 10) catch {
+        try c.text(.bad_request, "invalid id");
+        return;
+    };
+    var stmt = try getDb(c).prepare("SELECT id, name, email FROM users WHERE id = ?");
+    defer stmt.deinit();
+    const row = try stmt.oneAlloc(
+        struct { id: i64, name: []const u8, email: []const u8 },
+        c.allocator,
+        .{},
+        .{ .id = id },
+    );
+    if (row) |r| {
+        try c.jsonTyped(c.allocator, .ok, r);
+    } else {
+        try c.text(.not_found, "user not found");
+    }
+}
+
+fn dbCreateHandler(c: *fw.Context) !void {
+    const body = try c.readBody();
+    defer c.allocator.free(body);
+    const parsed = try std.json.parseFromSlice(std.json.Value, c.allocator, body, .{});
+    defer parsed.deinit();
+    const name = parsed.value.object.get("name") orelse {
+        try c.text(.bad_request, "missing name");
+        return;
+    };
+    const email = parsed.value.object.get("email") orelse {
+        try c.text(.bad_request, "missing email");
+        return;
+    };
+    try getDb(c).exec("INSERT INTO users (name, email) VALUES (?, ?)", .{}, .{ .name = name.string, .email = email.string });
+    try c.json(.created, "{\"status\":\"created\"}");
 }
 
 fn apiHelloHandler(ctx: *fw.Context) !void {

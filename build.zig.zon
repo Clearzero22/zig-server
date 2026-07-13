@@ -6,6 +6,11 @@
         "build.zig",
         "build.zig.zon",
         "src",
+        "lib",
     },
-    .dependencies = .{},
+    .dependencies = .{
+        .sqlite = .{
+            .path = "lib/zig-sqlite",
+        },
+    },
 }

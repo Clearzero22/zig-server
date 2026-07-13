@@ -26,6 +26,7 @@ params: Params = .{},
 query: QueryParams = .{},
 cors_origin: ?[]const u8 = null,
 max_body_size: usize = 10 * 1024 * 1024,
+db: ?*anyopaque = null,
 
 pub fn json(ctx: *@This(), status: http.Status, data: []const u8) !void {
     try respondExtra(ctx, data, .{

@@ -2,6 +2,7 @@ comptime {
     _ = @import("router.test.zig");
     _ = @import("context.test.zig");
     _ = @import("server.test.zig");
+    _ = @import("db.test.zig");
 }
 
 // 集成测试 (启动 HTTP 服务器 + 真实请求验证)

@@ -3,3 +3,5 @@ zig-out/
 server_out.txt
 server_err.txt
 *.exe
+lib/sqlite3/
+lib/zig-sqlite/

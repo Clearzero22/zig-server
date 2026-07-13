@@ -9,3 +9,4 @@ pub const swagger = @import("builtins/swagger.zig");
 pub const cors = @import("builtins/cors.zig");
 pub const logger = @import("builtins/logger.zig");
 pub const recovery = @import("builtins/recovery.zig");
+pub const db = @import("builtins/db/sqlite.zig");

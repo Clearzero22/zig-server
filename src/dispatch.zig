@@ -56,6 +56,7 @@ pub fn dispatchInner(ctx: *Context, router: *Router) !void {
     };
 
     ctx.params = match_result.params;
+    ctx.db = router.db;
 
     for (router.middleware.items) |mw| {
         if (!try mw(ctx)) return;

@@ -11,6 +11,7 @@ error_handler: ?Handler = null,
 named_routes: std.StringHashMap([]const u8),
 openapi_info: ?OpenApiInfo = null,
 locked: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+db: ?*anyopaque = null,
 
 pub const Method = enum {
     GET,
