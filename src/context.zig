@@ -228,6 +228,10 @@ fn parseMultipart(body: []const u8, dash_boundary: []const u8, crlf_boundary: []
     }
 }
 
+pub fn callParsePart(data: []const u8, params: *FormParams, files: *std.ArrayList(FormFile), allocator: std.mem.Allocator) void {
+    parsePart(data, params, files, allocator);
+}
+
 fn parsePart(data: []const u8, params: *FormParams, files: *std.ArrayList(FormFile), allocator: std.mem.Allocator) void {
     const sep = "\r\n\r\n";
     const header_end = std.mem.indexOf(u8, data, sep) orelse return;

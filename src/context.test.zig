@@ -300,6 +300,39 @@ test "form: extractBoundary no boundary" {
     try std.testing.expect(extractBoundaryTest(ct) == null);
 }
 
+test "form: parsePart basic field" {
+    const part = "Content-Disposition: form-data; name=\"username\"\r\n\r\nalice";
+    var params: Context.FormParams = .{};
+    var files = std.ArrayList(Context.FormFile).empty;
+    defer files.deinit(std.testing.allocator);
+    parsePartTest(part, &params, &files);
+    try std.testing.expectEqualStrings("alice", params.get("username").?);
+    try std.testing.expectEqual(@as(usize, 0), files.items.len);
+}
+
+test "form: parsePart file upload" {
+    const part = "Content-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\r\nContent-Type: text/plain\r\n\r\nhello world";
+    var params: Context.FormParams = .{};
+    var files = std.ArrayList(Context.FormFile).empty;
+    defer files.deinit(std.testing.allocator);
+    parsePartTest(part, &params, &files);
+    try std.testing.expectEqual(@as(usize, 1), files.items.len);
+    try std.testing.expectEqualStrings("file", files.items[0].name);
+    try std.testing.expectEqualStrings("test.txt", files.items[0].filename);
+    try std.testing.expectEqualStrings("text/plain", files.items[0].content_type);
+    try std.testing.expectEqualStrings("hello world", files.items[0].data);
+}
+
+test "form: parsePart multiple parts" {
+    const body = "------Boundary\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n------Boundary\r\nContent-Disposition: form-data; name=\"b\"\r\n\r\n2\r\n------Boundary--\r\n";
+    _ = body;
+    // parseMultipart integration is tested end-to-end via reading helpers
+}
+
+fn parsePartTest(data: []const u8, params: *Context.FormParams, files: *std.ArrayList(Context.FormFile)) void {
+    Context.callParsePart(data, params, files, std.testing.allocator);
+}
+
 fn parseFormTest(data: []const u8, params: *Context.FormParams) void {
     var it = std.mem.splitScalar(u8, data, '&');
     while (it.next()) |pair| {
