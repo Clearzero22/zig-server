@@ -660,7 +660,15 @@ pub fn group(self: *@This(), prefix: []const u8) Group {
 pub fn mount(self: *@This(), prefix: []const u8, sub: *@This()) !void {
     for (sub.routes.items) |route| {
         const full = try concat(self.allocator, prefix, route.path);
-        const mw_dup = if (route.middleware.len > 0) try self.allocator.dupe(Middleware, route.middleware) else null;
+        var mw_total: usize = sub.middleware.items.len;
+        if (route.middleware.len > 0) mw_total += route.middleware.len;
+        const mw_final = if (mw_total > 0) blk: {
+            var mw_slice = try self.allocator.alloc(Middleware, mw_total);
+            var idx: usize = 0;
+            for (sub.middleware.items) |mw| { mw_slice[idx] = mw; idx += 1; }
+            for (route.middleware) |mw| { mw_slice[idx] = mw; idx += 1; }
+            break :blk mw_slice;
+        } else &.{};
         const segs = try parseSegments(self.allocator, full);
         const hdrs_dup: ?[]HeaderMatch = null;
         try self.routes.append(self.allocator, .{
@@ -671,7 +679,7 @@ pub fn mount(self: *@This(), prefix: []const u8, sub: *@This()) !void {
             .priority = route.priority,
             .host = null,
             .headers = hdrs_dup,
-            .middleware = if (mw_dup) |m| m else &.{},
+            .middleware = mw_final,
             .cors_origin = null,
             .rate_limit = route.rate_limit,
             .has_wildcard = route.has_wildcard,

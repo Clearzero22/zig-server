@@ -16,18 +16,18 @@
 - [x] Custom matchers (header-based, host-based)
 
 ### Advanced
-- [ ] Sub-routers / resource routing
-- [ ] Route-level middleware
-- [ ] Route-level rate limiting
-- [ ] Route-level CORS policies
-- [ ] Route versioning
+- [x] Sub-routers / resource routing
+- [x] Route-level middleware
+- [x] Route-level rate limiting
+- [x] Route-level CORS policies
+- [x] Route versioning
 
 ## 2. Middleware
 
 ### Core Chain
 - [x] Middleware type definition (fn (ctx) bool)
 - [x] Global middleware stack
-- [ ] Route-level middleware
+- [x] Route-level middleware
 - [ ] Group-level middleware
 - [ ] Middleware with `next` callback for wrapping
 - [ ] Post-processing (response after handler)
@@ -260,7 +260,7 @@
 ## 14. API Features
 
 - [x] JSON responses
-- [ ] RESTful resource routing
+- [x] RESTful resource routing
 - [ ] Content negotiation
 - [ ] Pagination helpers
 - [ ] Sorting & filtering conventions
