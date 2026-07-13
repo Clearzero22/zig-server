@@ -1,12 +1,14 @@
 const std = @import("std");
 const Context = @import("context.zig");
 const Middleware = @import("middleware.zig").Middleware;
+const AfterMiddleware = @import("middleware.zig").AfterMiddleware;
 
 pub const Router = @This();
 
 allocator: std.mem.Allocator,
 routes: std.ArrayList(Route),
 middleware: std.ArrayList(Middleware),
+after_middleware: std.ArrayList(AfterMiddleware),
 error_handler: ?Handler = null,
 named_routes: std.StringHashMap([]const u8),
 openapi_info: ?OpenApiInfo = null,
@@ -111,6 +113,7 @@ pub fn init(allocator: std.mem.Allocator) @This() {
         .allocator = allocator,
         .routes = .empty,
         .middleware = .empty,
+        .after_middleware = .empty,
         .named_routes = std.StringHashMap([]const u8).init(allocator),
         .openapi_info = null,
         .locked = std.atomic.Value(bool).init(false),
@@ -145,6 +148,7 @@ pub fn deinit(self: *@This()) void {
     }
     self.routes.deinit(self.allocator);
     self.middleware.deinit(self.allocator);
+    self.after_middleware.deinit(self.allocator);
     self.named_routes.deinit();
     if (self.openapi_info) |info| {
         self.allocator.free(info.title);
@@ -155,6 +159,10 @@ pub fn deinit(self: *@This()) void {
 
 pub fn use(self: *@This(), mw: Middleware) !void {
     try self.middleware.append(self.allocator, mw);
+}
+
+pub fn after(self: *@This(), mw: AfterMiddleware) !void {
+    try self.after_middleware.append(self.allocator, mw);
 }
 
 pub fn onError(self: *@This(), handler: Handler) void {
@@ -601,55 +609,76 @@ fn matchClass(class: RegexClass, c: u8, literal: u8) bool {
 pub const Group = struct {
     router: *Router,
     prefix: []const u8,
+    middleware: std.ArrayList(Middleware) = .empty,
+
+    pub fn use(self: *Group, mw: Middleware) !void {
+        try self.middleware.append(self.router.allocator, mw);
+    }
+
+    fn mwArg(self: *Group) ?[]const Middleware {
+        return if (self.middleware.items.len > 0) self.middleware.items else null;
+    }
+
+    fn mergeOpts(self: *Group, opts: RouteOptions) RouteOptions {
+        const gmw = self.middleware.items;
+        if (gmw.len == 0) return opts;
+        if (opts.middleware) |omw| {
+            var buf: [32]Middleware = undefined;
+            @memcpy(buf[0..gmw.len], gmw);
+            @memcpy(buf[gmw.len..][0..omw.len], omw);
+            return .{ .middleware = buf[0..gmw.len + omw.len] };
+        }
+        return .{ .middleware = gmw };
+    }
 
     pub fn get(self: *Group, path: []const u8, handler: Handler) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.GET, full, handler, .{});
+        try self.router.addRoute(.GET, full, handler, .{ .middleware = self.mwArg() });
     }
 
     pub fn post(self: *Group, path: []const u8, handler: Handler) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.POST, full, handler, .{});
+        try self.router.addRoute(.POST, full, handler, .{ .middleware = self.mwArg() });
     }
 
     pub fn put(self: *Group, path: []const u8, handler: Handler) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.PUT, full, handler, .{});
+        try self.router.addRoute(.PUT, full, handler, .{ .middleware = self.mwArg() });
     }
 
     pub fn delete(self: *Group, path: []const u8, handler: Handler) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.DELETE, full, handler, .{});
+        try self.router.addRoute(.DELETE, full, handler, .{ .middleware = self.mwArg() });
     }
 
     pub fn patch(self: *Group, path: []const u8, handler: Handler) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.PATCH, full, handler, .{});
+        try self.router.addRoute(.PATCH, full, handler, .{ .middleware = self.mwArg() });
     }
 
     pub fn getOpts(self: *Group, path: []const u8, handler: Handler, opts: RouteOptions) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.GET, full, handler, opts);
+        try self.router.addRoute(.GET, full, handler, self.mergeOpts(opts));
     }
 
     pub fn postOpts(self: *Group, path: []const u8, handler: Handler, opts: RouteOptions) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.POST, full, handler, opts);
+        try self.router.addRoute(.POST, full, handler, self.mergeOpts(opts));
     }
 
     pub fn putOpts(self: *Group, path: []const u8, handler: Handler, opts: RouteOptions) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.PUT, full, handler, opts);
+        try self.router.addRoute(.PUT, full, handler, self.mergeOpts(opts));
     }
 
     pub fn deleteOpts(self: *Group, path: []const u8, handler: Handler, opts: RouteOptions) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.DELETE, full, handler, opts);
+        try self.router.addRoute(.DELETE, full, handler, self.mergeOpts(opts));
     }
 
     pub fn patchOpts(self: *Group, path: []const u8, handler: Handler, opts: RouteOptions) !void {
         const full = try concat(self.router.allocator, self.prefix, path);
-        try self.router.addRoute(.PATCH, full, handler, opts);
+        try self.router.addRoute(.PATCH, full, handler, self.mergeOpts(opts));
     }
 };
 

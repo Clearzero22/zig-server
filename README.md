@@ -248,7 +248,22 @@ src/
 │   ├── recovery.zig   — Panic recovery error handler
 │   └── swagger.zig    — Swagger UI + OpenAPI handler
 └── *test.zig          — Test files
+docs/                  — User documentation (getting-started, routing, middleware, etc.)
+examples/              — 15 runnable examples (zig build ex-<name>)
 ```
+
+## Documentation
+
+详见 [docs/](docs/) 目录：
+
+- [快速开始](docs/getting-started.md) — 安装、最小服务器、示例一览
+- [路由](docs/routing.md) — 路径模式、RouteOptions、组、反向路由
+- [中间件](docs/middleware.md) — 全局/组级/路由级中间件、后处理钩子
+- [Context API](docs/context.md) — 响应辅助、请求数据、参数获取
+- [服务器](docs/server.md) — 线程池、优雅关闭
+- [高级功能](docs/advanced.md) — resource、mount、CORS、限速、版本
+- [OpenAPI](docs/openapi.md) — Swagger UI
+- [数据库](docs/database.md) — SQLite CRUD
 
 ## Build & Test
 

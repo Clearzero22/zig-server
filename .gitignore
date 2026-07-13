@@ -1,5 +1,9 @@
 zig-out/
 .zig-cache/
+docs/index.html
+docs/main.js
+docs/main.wasm
+docs/sources.tar
 server_out.txt
 server_err.txt
 *.exe

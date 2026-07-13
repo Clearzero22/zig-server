@@ -1,6 +1,7 @@
 const std = @import("std");
 const Context = @import("context.zig");
 const Router = @import("router.zig");
+const AfterMiddleware = @import("middleware.zig").AfterMiddleware;
 
 var rate_counters: ?*std.StringHashMap(u32) = null;
 var rate_alloc: ?std.mem.Allocator = null;
@@ -103,7 +104,14 @@ pub fn dispatchInner(ctx: *Context, router: *Router) !void {
         try rateLimitCheck(ctx, rl);
     }
 
-    try match_result.handler(ctx);
+    {
+        defer {
+            for (router.after_middleware.items) |mw| {
+                mw(ctx);
+            }
+        }
+        try match_result.handler(ctx);
+    }
 }
 
 pub fn pathOnly(target: []const u8) []const u8 {

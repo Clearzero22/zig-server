@@ -7,6 +7,9 @@
         "build.zig.zon",
         "src",
         "lib",
+        "docs",
+        "LICENSE",
+        "README.md",
     },
     .dependencies = .{
         .sqlite = .{
