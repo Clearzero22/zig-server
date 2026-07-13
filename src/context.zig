@@ -288,7 +288,7 @@ fn parsePart(data: []const u8, params: *FormParams, files: *std.ArrayList(FormFi
 pub fn json(ctx: *@This(), status: http.Status, data: []const u8) !void {
     try respondExtra(ctx, data, .{
         .status = status,
-        .keep_alive = false,
+        .keep_alive = ctx.request.head.keep_alive,
     }, &.{
         http.Header{ .name = "content-type", .value = "application/json" },
     });
@@ -299,7 +299,7 @@ pub fn jsonTyped(ctx: *@This(), allocator: std.mem.Allocator, status: http.Statu
     defer allocator.free(data);
     try respondExtra(ctx, data, .{
         .status = status,
-        .keep_alive = false,
+        .keep_alive = ctx.request.head.keep_alive,
     }, &.{
         http.Header{ .name = "content-type", .value = "application/json" },
     });
@@ -308,14 +308,14 @@ pub fn jsonTyped(ctx: *@This(), allocator: std.mem.Allocator, status: http.Statu
 pub fn text(ctx: *@This(), status: http.Status, body: []const u8) !void {
     try respondExtra(ctx, body, .{
         .status = status,
-        .keep_alive = false,
+        .keep_alive = ctx.request.head.keep_alive,
     }, &.{});
 }
 
 pub fn html(ctx: *@This(), status: http.Status, body: []const u8) !void {
     try respondExtra(ctx, body, .{
         .status = status,
-        .keep_alive = false,
+        .keep_alive = ctx.request.head.keep_alive,
     }, &.{
         http.Header{ .name = "content-type", .value = "text/html; charset=utf-8" },
     });
@@ -324,7 +324,7 @@ pub fn html(ctx: *@This(), status: http.Status, body: []const u8) !void {
 pub fn internalError(ctx: *@This(), _: anyerror) !void {
     try respondExtra(ctx, "{\"error\":\"Internal Server Error\",\"status\":500}", .{
         .status = .internal_server_error,
-        .keep_alive = false,
+        .keep_alive = ctx.request.head.keep_alive,
     }, &.{
         http.Header{ .name = "content-type", .value = "application/json" },
     });
@@ -351,7 +351,7 @@ pub fn readJson(ctx: *@This(), comptime T: type) !T {
 pub fn redirect(ctx: *@This(), status: http.Status, url: []const u8) !void {
     try respondExtra(ctx, "", .{
         .status = status,
-        .keep_alive = false,
+        .keep_alive = ctx.request.head.keep_alive,
     }, &.{
         http.Header{ .name = "location", .value = url },
     });
@@ -360,7 +360,7 @@ pub fn redirect(ctx: *@This(), status: http.Status, url: []const u8) !void {
 pub fn noContent(ctx: *@This()) !void {
     try respondExtra(ctx, "", .{
         .status = .no_content,
-        .keep_alive = false,
+        .keep_alive = ctx.request.head.keep_alive,
     }, &.{});
 }
 
@@ -376,7 +376,7 @@ pub fn sendFile(ctx: *@This(), path: []const u8) !void {
         const msg = "File too large";
         try respondExtra(ctx, msg, .{
             .status = .payload_too_large,
-            .keep_alive = false,
+            .keep_alive = ctx.request.head.keep_alive,
         }, &.{});
         return;
     }
@@ -388,7 +388,7 @@ pub fn sendFile(ctx: *@This(), path: []const u8) !void {
 
     try respondExtra(ctx, data, .{
         .status = .ok,
-        .keep_alive = false,
+        .keep_alive = ctx.request.head.keep_alive,
     }, &.{
         http.Header{ .name = "content-type", .value = mime },
     });
@@ -441,7 +441,7 @@ fn respondExtra(ctx: *@This(), data: []const u8, opts: anytype, extra: []const h
 
     try ctx.request.respond(data, .{
         .status = opts.status,
-        .keep_alive = false,
+        .keep_alive = opts.keep_alive,
         .extra_headers = buf[0..n],
     });
 }
