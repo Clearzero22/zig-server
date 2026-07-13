@@ -1,5 +1,4 @@
 const std = @import("std");
-const Context = @import("context.zig");
 const Router = @import("router.zig");
 const Dispatch = @import("dispatch.zig");
 
@@ -73,37 +72,9 @@ fn workerFn(pool: *@This()) void {
         }
 
         if (job) |j| {
-            handleConnection(j.io, j.router, j.conn);
+            Dispatch.handleConnection(j.io, j.router, j.conn);
         } else {
             std.Thread.yield() catch {};
         }
     }
-}
-
-fn handleConnection(io: std.Io, router: *Router, conn: std.Io.net.Stream) void {
-    defer conn.close(io);
-
-    var read_buf: [8192]u8 = undefined;
-    var write_buf: [4096]u8 = undefined;
-
-    var reader = conn.reader(io, &read_buf);
-    var writer = conn.writer(io, &write_buf);
-
-    var http_server = std.http.Server.init(&reader.interface, &writer.interface);
-
-    while (true) {
-        var request = http_server.receiveHead() catch return;
-
-        var ctx = Context{
-            .io = io,
-            .allocator = router.allocator,
-            .request = &request,
-        };
-
-        dispatch(&ctx, router);
-    }
-}
-
-fn dispatch(ctx: *Context, router: *Router) void {
-    Dispatch.handle(ctx, router);
 }

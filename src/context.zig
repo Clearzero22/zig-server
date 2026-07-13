@@ -3,8 +3,10 @@ const http = std.http;
 
 pub const Param = struct { key: []const u8, value: []const u8 };
 
+pub const MAX_PARAMS: usize = 16;
+
 pub const Params = struct {
-    items: [8]Param = undefined,
+    items: [MAX_PARAMS]Param = undefined,
     len: usize = 0,
 
     pub fn get(self: *const Params, key: []const u8) ?[]const u8 {
@@ -62,7 +64,7 @@ pub fn html(ctx: *@This(), status: http.Status, body: []const u8) !void {
 }
 
 pub fn internalError(ctx: *@This(), _: anyerror) !void {
-    try respondExtra(ctx, "{\"error\":\"Internal Server Error\"}", .{
+    try respondExtra(ctx, "{\"error\":\"Internal Server Error\",\"status\":500}", .{
         .status = .internal_server_error,
         .keep_alive = false,
     }, &.{

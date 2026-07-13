@@ -2,6 +2,30 @@ const std = @import("std");
 const Context = @import("context.zig");
 const Router = @import("router.zig");
 
+pub fn handleConnection(io: std.Io, router: *Router, conn: std.Io.net.Stream) void {
+    defer conn.close(io);
+
+    var read_buf: [8192]u8 = undefined;
+    var write_buf: [4096]u8 = undefined;
+
+    var reader = conn.reader(io, &read_buf);
+    var writer = conn.writer(io, &write_buf);
+
+    var http_server = std.http.Server.init(&reader.interface, &writer.interface);
+
+    while (true) {
+        var request = http_server.receiveHead() catch return;
+
+        var ctx = Context{
+            .io = io,
+            .allocator = router.allocator,
+            .request = &request,
+        };
+
+        dispatch(&ctx, router);
+    }
+}
+
 pub fn dispatch(ctx: *Context, router: *Router) void {
     if (router.error_handler) |on_err| {
         dispatchInner(ctx, router) catch {
@@ -50,7 +74,7 @@ pub fn parseQuery(target: []const u8, query: *Context.QueryParams) void {
     var it = std.mem.splitScalar(u8, qs, '&');
     while (it.next()) |pair| {
         if (pair.len == 0) continue;
-        if (query.len >= 8) return;
+        if (query.len >= Context.MAX_PARAMS) return;
         if (std.mem.indexOfScalar(u8, pair, '=')) |i| {
             query.items[query.len] = .{ .key = pair[0..i], .value = pair[i + 1 ..] };
             query.len += 1;

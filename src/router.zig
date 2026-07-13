@@ -10,7 +10,7 @@ middleware: std.ArrayList(Middleware),
 error_handler: ?Handler = null,
 named_routes: std.StringHashMap([]const u8),
 openapi_info: ?OpenApiInfo = null,
-sorted: bool = false,
+locked: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
 pub const Method = enum {
     GET,
@@ -98,7 +98,7 @@ pub fn init(allocator: std.mem.Allocator) @This() {
         .middleware = .empty,
         .named_routes = std.StringHashMap([]const u8).init(allocator),
         .openapi_info = null,
-        .sorted = true,
+        .locked = std.atomic.Value(bool).init(false),
     };
 }
 
@@ -145,6 +145,7 @@ pub fn onError(self: *@This(), handler: Handler) void {
 }
 
 fn addRoute(self: *@This(), method: Method, path: []const u8, handler: Handler, opts: RouteOptions) !void {
+    if (self.locked.load(.acquire)) return error.RouterLocked;
     for (self.routes.items) |r| {
         if (r.method == method and std.mem.eql(u8, r.path, path)) {
             return error.RouteConflict;
@@ -153,7 +154,12 @@ fn addRoute(self: *@This(), method: Method, path: []const u8, handler: Handler, 
 
     const has_wc = std.mem.indexOfScalar(u8, path, '*') != null;
     const segs = try parseSegments(self.allocator, path);
-    errdefer self.allocator.free(segs);
+    errdefer {
+        for (segs) |s| {
+            if (s == .multi_param) self.allocator.free(s.multi_param);
+        }
+        self.allocator.free(segs);
+    }
 
     var hdrs_dup: ?[]HeaderMatch = null;
     if (opts.headers) |hdrs| {
@@ -184,15 +190,19 @@ fn addRoute(self: *@This(), method: Method, path: []const u8, handler: Handler, 
         .response_type = if (opts.response_type) |r| try self.allocator.dupe(u8, r) else null,
     });
 
-    self.sorted = false;
-
     if (opts.name) |n| {
-        self.named_routes.put(n, path) catch {};
+        _ = try self.named_routes.put(n, path);
     }
 }
 
 fn parseSegments(allocator: std.mem.Allocator, path: []const u8) ![]const Segment {
     var segs = std.ArrayList(Segment).empty;
+    errdefer {
+        for (segs.items) |seg| {
+            if (seg == .multi_param) allocator.free(seg.multi_param);
+        }
+        segs.deinit(allocator);
+    }
 
     var it = std.mem.splitScalar(u8, path, '/');
     while (it.next()) |seg| {
@@ -206,6 +216,7 @@ fn parseSegments(allocator: std.mem.Allocator, path: []const u8) ![]const Segmen
                 try segs.append(allocator, .{ .optional_param = body[0 .. body.len - 1] });
             } else if (std.mem.indexOfScalar(u8, body, '+')) |_| {
                 const names = try splitParamNames(allocator, body);
+                errdefer allocator.free(names);
                 try segs.append(allocator, .{ .multi_param = names });
             } else {
                 try segs.append(allocator, .{ .param = body });
@@ -221,6 +232,7 @@ fn parseSegments(allocator: std.mem.Allocator, path: []const u8) ![]const Segmen
 
 fn splitParamNames(allocator: std.mem.Allocator, body: []const u8) ![]const []const u8 {
     var names = std.ArrayList([]const u8).empty;
+    errdefer names.deinit(allocator);
     var it = std.mem.splitScalar(u8, body, '+');
     while (it.next()) |name| {
         const cleaned = if (name.len > 0 and name[0] == ':') name[1..] else name;
@@ -359,8 +371,13 @@ fn buildURL(allocator: std.mem.Allocator, pattern: []const u8, params: anytype) 
     return result.toOwnedSlice(allocator);
 }
 
+pub fn lock(self: *@This()) void {
+    self.sortRoutes();
+    self.locked.store(true, .release);
+}
+
 pub fn match(self: *@This(), method: Method, target: []const u8) ?MatchResult {
-    if (!self.sorted) self.sortRoutes();
+    if (!self.locked.load(.acquire)) self.sortRoutes();
 
     for (self.routes.items) |route| {
         if (route.method != method) continue;
@@ -374,7 +391,6 @@ pub fn match(self: *@This(), method: Method, target: []const u8) ?MatchResult {
 }
 
 fn sortRoutes(self: *@This()) void {
-    self.sorted = true;
     std.mem.sort(Route, self.routes.items, {}, struct {
         fn less(_: void, a: Route, b: Route) bool {
             if (a.priority != b.priority) return a.priority > b.priority;
@@ -388,7 +404,7 @@ fn matchSegments(segments: []const Segment, target: []const u8, params: *Context
     if (segments.len == 1 and segments[0] == .wildcard) {
         const name = segments[0].wildcard;
         if (name.len > 0) {
-            if (params.len >= 8) return false;
+            if (params.len >= Context.MAX_PARAMS) return false;
             const val = if (target.len > 0 and target[0] == '/') target[1..] else target;
             params.items[params.len] = .{ .key = name, .value = val };
             params.len += 1;
@@ -406,13 +422,13 @@ fn matchSegments(segments: []const Segment, target: []const u8, params: *Context
             },
             .param => |name| {
                 const t_seg = tgt_it.next() orelse return false;
-                if (params.len >= 8) return false;
+                if (params.len >= Context.MAX_PARAMS) return false;
                 params.items[params.len] = .{ .key = name, .value = t_seg };
                 params.len += 1;
             },
             .optional_param => |name| {
                 if (tgt_it.next()) |t_seg| {
-                    if (params.len >= 8) return false;
+                    if (params.len >= Context.MAX_PARAMS) return false;
                     params.items[params.len] = .{ .key = name, .value = t_seg };
                     params.len += 1;
                 }
@@ -422,12 +438,12 @@ fn matchSegments(segments: []const Segment, target: []const u8, params: *Context
                     const seg_start = @intFromPtr(seg_val.ptr) - @intFromPtr(target.ptr);
                     const remaining = target[seg_start..];
                     if (name.len > 0) {
-                        if (params.len >= 8) return false;
+                        if (params.len >= Context.MAX_PARAMS) return false;
                         params.items[params.len] = .{ .key = name, .value = remaining };
                         params.len += 1;
                     }
                 } else if (name.len > 0) {
-                    if (params.len >= 8) return false;
+                    if (params.len >= Context.MAX_PARAMS) return false;
                     params.items[params.len] = .{ .key = name, .value = "" };
                     params.len += 1;
                 }
@@ -441,7 +457,7 @@ fn matchSegments(segments: []const Segment, target: []const u8, params: *Context
                 const t_seg = tgt_it.next() orelse return false;
                 var remaining = t_seg;
                 for (mp, 0..) |name, j| {
-                    if (params.len >= 8) return false;
+                    if (params.len >= Context.MAX_PARAMS) return false;
                     if (j == mp.len - 1) {
                         params.items[params.len] = .{ .key = name, .value = remaining };
                         params.len += 1;
@@ -693,9 +709,6 @@ fn generateOpenApiJson(router: *Router, allocator: std.mem.Allocator) ![]const u
 
         const ml = @tagName(route.method);
         var lower_buf: [5]u8 = undefined;
-        for (ml, 0..) |c, i| {
-            lower_buf[i] = std.ascii.toLower(c);
-        }
         for (ml, 0..) |c, i| {
             lower_buf[i] = std.ascii.toLower(c);
         }

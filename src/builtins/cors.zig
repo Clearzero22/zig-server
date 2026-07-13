@@ -34,14 +34,14 @@ pub fn handler(ctx: *Context) !bool {
     if (!matched) return true;
 
     if (ctx.request.head.method != .OPTIONS) {
-        ctx.cors_origin = if (std.mem.eql(u8, config.allow_origins[0], "*")) "*" else origin;
+        ctx.cors_origin = if (config.allow_origins.len > 0 and std.mem.eql(u8, config.allow_origins[0], "*")) "*" else origin;
         return true;
     }
 
     var hdrs: [6]http.Header = undefined;
     var n: usize = 0;
 
-    hdrs[n] = .{ .name = "access-control-allow-origin", .value = if (std.mem.eql(u8, config.allow_origins[0], "*")) "*" else origin };
+    hdrs[n] = .{ .name = "access-control-allow-origin", .value = if (config.allow_origins.len > 0 and std.mem.eql(u8, config.allow_origins[0], "*")) "*" else origin };
     n += 1;
 
     if (config.allow_credentials) {

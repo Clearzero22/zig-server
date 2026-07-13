@@ -135,25 +135,25 @@ test "router: params overflow" {
     var router = Router.init(std.testing.allocator);
     defer router.deinit();
 
-    try router.get("/:a/:b/:c/:d/:e/:f/:g/:h/:i", struct {
+    try router.get("/:a/:b/:c/:d/:e/:f/:g/:h/:i/:j/:k/:l/:m/:n/:o/:p/:q", struct {
         fn h(_: *Context) !void {}
     }.h);
 
-    const r = router.match(.GET, "/1/2/3/4/5/6/7/8/9");
+    const r = router.match(.GET, "/1/2/3/4/5/6/7/8/9/10/11/12/13/14/15/16/17");
     try std.testing.expect(r == null);
 }
 
-test "router: params exactly 8" {
+test "router: params exactly 16" {
     var router = Router.init(std.testing.allocator);
     defer router.deinit();
 
-    try router.get("/:a/:b/:c/:d/:e/:f/:g/:h", struct {
+    try router.get("/:a/:b/:c/:d/:e/:f/:g/:h/:i/:j/:k/:l/:m/:n/:o/:p", struct {
         fn h(_: *Context) !void {}
     }.h);
 
-    const r = router.match(.GET, "/1/2/3/4/5/6/7/8");
+    const r = router.match(.GET, "/1/2/3/4/5/6/7/8/9/10/11/12/13/14/15/16");
     try std.testing.expect(r != null);
-    try std.testing.expectEqualStrings("8", r.?.params.get("h").?);
+    try std.testing.expectEqualStrings("16", r.?.params.get("p").?);
 }
 
 test "router: empty segment not match" {
@@ -421,4 +421,92 @@ test "router: openapi deinit frees metadata" {
     const json = try router.openapiJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"summary\": \"Sum\"") != null);
+}
+
+test "router: lock prevents addRoute" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    router.lock();
+    const H = struct { fn h(_: *Context) !void {} };
+    try std.testing.expectError(error.RouterLocked, router.get("/x", H.h));
+}
+
+test "router: lock allows match" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    const H = struct { fn h(_: *Context) !void {} };
+    try router.get("/hello", H.h);
+    router.lock();
+
+    try std.testing.expect(router.match(.GET, "/hello") != null);
+    try std.testing.expect(router.match(.GET, "/world") == null);
+}
+
+var mw_blocked: bool = false;
+var mw_called: bool = false;
+
+fn middleWare(ctx: *Context) anyerror!bool {
+    _ = ctx;
+    mw_blocked = true;
+    return false;
+}
+
+fn testHandler(_: *Context) anyerror!void {
+    mw_called = true;
+}
+
+test "router: middleware short-circuit" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    mw_blocked = false;
+    mw_called = false;
+
+    try router.use(middleWare);
+    try router.get("/test", testHandler);
+    router.lock();
+
+    var ctx = Context{
+        .io = undefined,
+        .allocator = std.testing.allocator,
+        .request = undefined,
+    };
+
+    const result = router.match(.GET, "/test");
+    try std.testing.expect(result != null);
+    ctx.params = result.?.params;
+
+    for (router.middleware.items) |mw| {
+        if (!try mw(&ctx)) return;
+    }
+
+    try std.testing.expect(mw_blocked);
+    try std.testing.expect(!mw_called);
+}
+
+test "router: error handler is registered" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    try std.testing.expect(router.error_handler == null);
+
+    const H = struct { fn h(_: *Context) anyerror!void {} };
+    router.onError(H.h);
+
+    try std.testing.expect(router.error_handler != null);
+}
+
+test "router: middleware are registered in order" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    const M1 = struct { fn mw(_: *Context) anyerror!bool { return true; } };
+    const M2 = struct { fn mw(_: *Context) anyerror!bool { return true; } };
+
+    try router.use(M1.mw);
+    try router.use(M2.mw);
+
+    try std.testing.expectEqual(@as(usize, 2), router.middleware.items.len);
 }

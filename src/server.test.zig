@@ -72,7 +72,7 @@ fn parseQuery(target: []const u8, query: *Context.QueryParams) void {
     var it = std.mem.splitScalar(u8, qs, '&');
     while (it.next()) |pair| {
         if (pair.len == 0) continue;
-        if (query.len >= 8) return;
+        if (query.len >= Context.MAX_PARAMS) return;
         if (std.mem.indexOfScalar(u8, pair, '=')) |i| {
             query.items[query.len] = .{ .key = pair[0..i], .value = pair[i + 1 ..] };
             query.len += 1;

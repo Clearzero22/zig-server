@@ -80,11 +80,13 @@ test "context: QueryParams no query" {
     try std.testing.expectEqual(@as(usize, 0), query.len);
 }
 
-test "context: QueryParams max 8 entries" {
+test "context: QueryParams max entries" {
     var query: Context.QueryParams = .{};
-    parseQueryTest("?a=1&b=2&c=3&d=4&e=5&f=6&g=7&h=8&i=9", &query);
-    try std.testing.expectEqual(@as(usize, 8), query.len);
-    try std.testing.expect(query.get("i") == null);
+    parseQueryTest("?a=1&b=2&c=3&d=4&e=5&f=6&g=7&h=8&i=9&j=10&k=11&l=12&m=13&n=14&o=15&p=16&q=17", &query);
+    try std.testing.expectEqual(Context.MAX_PARAMS, query.len);
+    try std.testing.expect(query.get("a") != null);
+    try std.testing.expect(query.get("p") != null);
+    try std.testing.expect(query.get("q") == null);
 }
 
 test "context: QueryParams empty value after ==" {
@@ -101,12 +103,16 @@ test "context: QueryParams special chars" {
     try std.testing.expectEqualStrings("zh-CN", query.get("lang").?);
 }
 
+test "context: MAX_PARAMS constant value" {
+    try std.testing.expectEqual(@as(usize, 16), Context.MAX_PARAMS);
+}
+
 fn parseQueryTest(target: []const u8, query: *Context.QueryParams) void {
     const qs = if (std.mem.indexOfScalar(u8, target, '?')) |i| target[i + 1 ..] else return;
     var it = std.mem.splitScalar(u8, qs, '&');
     while (it.next()) |pair| {
         if (pair.len == 0) continue;
-        if (query.len >= 8) return;
+        if (query.len >= Context.MAX_PARAMS) return;
         if (std.mem.indexOfScalar(u8, pair, '=')) |i| {
             query.items[query.len] = .{ .key = pair[0..i], .value = pair[i + 1 ..] };
             query.len += 1;
