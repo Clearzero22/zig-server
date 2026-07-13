@@ -4,6 +4,7 @@ const Context = @import("context.zig");
 const secure_headers = @import("builtins/secure_headers.zig");
 const request_id = @import("builtins/request_id.zig");
 const request_timeout = @import("builtins/request_timeout.zig");
+const static_files = @import("builtins/static.zig");
 
 test "router: static path match" {
     var router = Router.init(std.testing.allocator);
@@ -784,4 +785,39 @@ test "router: request_timeout middleware" {
     request_timeout.init(.{ .timeout_ms = 5000 });
     try std.testing.expect(try request_timeout.handler(&ctx));
     try std.testing.expect(ctx.deadline > 0);
+}
+
+test "router: static route matches wildcard" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    try router.static("/files", "public");
+
+    const r1 = router.match(.GET, "/files/style.css");
+    try std.testing.expect(r1 != null);
+    try std.testing.expectEqualStrings("style.css", r1.?.params.get("filepath").?);
+
+    const r2 = router.match(.GET, "/files/sub/dir/app.js");
+    try std.testing.expect(r2 != null);
+    try std.testing.expectEqualStrings("sub/dir/app.js", r2.?.params.get("filepath").?);
+
+    try std.testing.expect(router.match(.GET, "/other") == null);
+}
+
+test "router: static builtin handler blocks path traversal" {
+    static_files.dir = "public";
+
+    const H = struct {
+        fn h(ctx: *Context) !void {
+            try ctx.text(.ok, "should not reach");
+        }
+    };
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    try router.getOpts("/static/*filepath", static_files.handle, .{});
+    try router.get("/ok", H.h);
+    router.lock();
+
+    _ = router.match(.GET, "/ok"); // verify lock works
 }

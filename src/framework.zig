@@ -18,3 +18,4 @@ pub const request_id = @import("builtins/request_id.zig");
 pub const request_timeout = @import("builtins/request_timeout.zig");
 pub const db = @import("builtins/db/sqlite.zig");
 pub const env = @import("builtins/env.zig");
+pub const static_files = @import("builtins/static.zig");

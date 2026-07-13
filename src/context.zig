@@ -111,6 +111,57 @@ pub fn noContent(ctx: *@This()) !void {
     }, &.{});
 }
 
+pub fn sendFile(ctx: *@This(), path: []const u8) !void {
+    const file = std.Io.Dir.openFile(.cwd(), ctx.io, path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return ctx.text(.not_found, "Not Found"),
+        else => return err,
+    };
+    defer file.close(ctx.io);
+
+    const stat = try file.stat(ctx.io);
+    if (stat.size > ctx.max_body_size) {
+        const msg = "File too large";
+        try respondExtra(ctx, msg, .{
+            .status = .payload_too_large,
+            .keep_alive = false,
+        }, &.{});
+        return;
+    }
+    const data = try ctx.allocator.alloc(u8, @as(usize, @intCast(stat.size)));
+    defer ctx.allocator.free(data);
+    _ = try file.readPositionalAll(ctx.io, data, 0);
+
+    const mime = mimeType(std.fs.path.extension(path));
+
+    try respondExtra(ctx, data, .{
+        .status = .ok,
+        .keep_alive = false,
+    }, &.{
+        http.Header{ .name = "content-type", .value = mime },
+    });
+}
+
+fn mimeType(ext: []const u8) []const u8 {
+    if (std.mem.eql(u8, ext, ".html") or std.mem.eql(u8, ext, ".htm")) return "text/html; charset=utf-8";
+    if (std.mem.eql(u8, ext, ".css")) return "text/css; charset=utf-8";
+    if (std.mem.eql(u8, ext, ".js")) return "application/javascript";
+    if (std.mem.eql(u8, ext, ".json")) return "application/json";
+    if (std.mem.eql(u8, ext, ".png")) return "image/png";
+    if (std.mem.eql(u8, ext, ".jpg") or std.mem.eql(u8, ext, ".jpeg")) return "image/jpeg";
+    if (std.mem.eql(u8, ext, ".gif")) return "image/gif";
+    if (std.mem.eql(u8, ext, ".svg")) return "image/svg+xml";
+    if (std.mem.eql(u8, ext, ".ico")) return "image/x-icon";
+    if (std.mem.eql(u8, ext, ".woff2")) return "font/woff2";
+    if (std.mem.eql(u8, ext, ".woff")) return "font/woff";
+    if (std.mem.eql(u8, ext, ".ttf")) return "font/ttf";
+    if (std.mem.eql(u8, ext, ".txt")) return "text/plain; charset=utf-8";
+    if (std.mem.eql(u8, ext, ".xml")) return "application/xml";
+    if (std.mem.eql(u8, ext, ".pdf")) return "application/pdf";
+    if (std.mem.eql(u8, ext, ".wasm")) return "application/wasm";
+    if (std.mem.eql(u8, ext, ".map")) return "application/json";
+    return "application/octet-stream";
+}
+
 pub fn header(ctx: *@This(), name: []const u8, value: []const u8) !void {
     if (ctx.extra_header_count >= 8) return error.TooManyHeaders;
     ctx.extra_header_buf[ctx.extra_header_count] = .{ .name = name, .value = value };

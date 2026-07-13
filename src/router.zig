@@ -347,6 +347,14 @@ pub fn url(self: *@This(), name: []const u8, params: anytype) ![]const u8 {
     return try buildURL(self.allocator, pattern, params);
 }
 
+pub fn static(self: *@This(), prefix: []const u8, dir_path: []const u8) !void {
+    const path = try std.fmt.allocPrint(self.allocator, "{s}/*filepath", .{prefix});
+    defer self.allocator.free(path);
+    const static_module = @import("builtins/static.zig");
+    static_module.dir = dir_path;
+    try self.getOpts(path, static_module.handle, .{});
+}
+
 pub fn setOpenApiInfo(self: *@This(), title: []const u8, version: []const u8, description: ?[]const u8) !void {
     if (self.openapi_info) |old| {
         self.allocator.free(old.title);
