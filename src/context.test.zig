@@ -107,6 +107,128 @@ test "context: MAX_PARAMS constant value" {
     try std.testing.expectEqual(@as(usize, 16), Context.MAX_PARAMS);
 }
 
+test "cookie: parse single cookie" {
+    var req = std.http.Server.Request{
+        .server = undefined,
+        .head = .{
+            .method = .GET,
+            .target = "/",
+            .version = .@"HTTP/1.1",
+            .expect = null,
+            .content_type = null,
+            .content_length = null,
+            .transfer_encoding = .none,
+            .transfer_compression = .identity,
+            .keep_alive = false,
+        },
+        .head_buffer = "GET / HTTP/1.1\r\nCookie: session=abc123\r\n\r\n",
+    };
+    var ctx = Context{
+        .io = undefined,
+        .allocator = std.testing.allocator,
+        .request = &req,
+    };
+    try std.testing.expectEqualStrings("abc123", ctx.cookie("session").?);
+    try std.testing.expect(ctx.cookie("nonexistent") == null);
+}
+
+test "cookie: parse multiple cookies" {
+    var req = std.http.Server.Request{
+        .server = undefined,
+        .head = .{
+            .method = .GET,
+            .target = "/",
+            .version = .@"HTTP/1.1",
+            .expect = null,
+            .content_type = null,
+            .content_length = null,
+            .transfer_encoding = .none,
+            .transfer_compression = .identity,
+            .keep_alive = false,
+        },
+        .head_buffer = "GET / HTTP/1.1\r\nCookie: session=abc123; theme=dark; lang=en\r\n\r\n",
+    };
+    var ctx = Context{
+        .io = undefined,
+        .allocator = std.testing.allocator,
+        .request = &req,
+    };
+    try std.testing.expectEqualStrings("abc123", ctx.cookie("session").?);
+    try std.testing.expectEqualStrings("dark", ctx.cookie("theme").?);
+    try std.testing.expectEqualStrings("en", ctx.cookie("lang").?);
+    try std.testing.expect(ctx.cookie("missing") == null);
+}
+
+test "cookie: parse no cookie header" {
+    var req = std.http.Server.Request{
+        .server = undefined,
+        .head = .{
+            .method = .GET,
+            .target = "/",
+            .version = .@"HTTP/1.1",
+            .expect = null,
+            .content_type = null,
+            .content_length = null,
+            .transfer_encoding = .none,
+            .transfer_compression = .identity,
+            .keep_alive = false,
+        },
+        .head_buffer = "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n",
+    };
+    var ctx = Context{
+        .io = undefined,
+        .allocator = std.testing.allocator,
+        .request = &req,
+    };
+    try std.testing.expect(ctx.cookie("anything") == null);
+}
+
+test "context: setCookie stores header" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var ctx = Context{
+        .io = undefined,
+        .allocator = arena.allocator(),
+        .request = undefined,
+    };
+    try ctx.setCookie("session", "tok123");
+    try std.testing.expectEqual(@as(usize, 1), ctx.extra_header_count);
+    try std.testing.expectEqualStrings("Set-Cookie", ctx.extra_header_buf[0].name);
+    try std.testing.expectEqualStrings("session=tok123", ctx.extra_header_buf[0].value);
+}
+
+test "context: setCookieOpts with all options" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var ctx = Context{
+        .io = undefined,
+        .allocator = arena.allocator(),
+        .request = undefined,
+    };
+    try ctx.setCookieOpts("token", "val", .{
+        .http_only = true,
+        .secure = true,
+        .path = "/",
+        .max_age = 3600,
+        .same_site = .Lax,
+    });
+    var i: usize = 0;
+    while (i < ctx.extra_header_count) : (i += 1) {
+        const h = ctx.extra_header_buf[i];
+        if (std.mem.eql(u8, h.name, "Set-Cookie")) {
+            const v = h.value;
+            try std.testing.expect(std.mem.indexOf(u8, v, "token=val") != null);
+            try std.testing.expect(std.mem.indexOf(u8, v, "HttpOnly") != null);
+            try std.testing.expect(std.mem.indexOf(u8, v, "Secure") != null);
+            try std.testing.expect(std.mem.indexOf(u8, v, "Path=/") != null);
+            try std.testing.expect(std.mem.indexOf(u8, v, "Max-Age=3600") != null);
+            try std.testing.expect(std.mem.indexOf(u8, v, "SameSite=Lax") != null);
+            return;
+        }
+    }
+    try std.testing.expect(false); // should have found header
+}
+
 test "context: header stores extra headers" {
     var ctx = Context{
         .io = undefined,
@@ -133,6 +255,79 @@ test "context: header overflow" {
         try ctx.header("h", "v");
     }
     try std.testing.expectError(error.TooManyHeaders, ctx.header("overflow", "bad"));
+}
+
+test "form: parseUrlEncoded basic" {
+    var params: Context.FormParams = .{};
+    parseFormTest("name=alice&age=30", &params);
+    try std.testing.expectEqualStrings("alice", params.get("name").?);
+    try std.testing.expectEqualStrings("30", params.get("age").?);
+    try std.testing.expectEqual(@as(usize, 2), params.len);
+}
+
+test "form: parseUrlEncoded empty value" {
+    var params: Context.FormParams = .{};
+    parseFormTest("key=&flag", &params);
+    try std.testing.expectEqualStrings("", params.get("key").?);
+    try std.testing.expectEqualStrings("", params.get("flag").?);
+}
+
+test "form: parseUrlEncoded max entries" {
+    var params: Context.FormParams = .{};
+    parseFormTest("a=1&b=2&c=3&d=4&e=5&f=6&g=7&h=8&i=9&j=10&k=11&l=12&m=13&n=14&o=15&p=16&q=17", &params);
+    try std.testing.expectEqual(Context.MAX_PARAMS, params.len);
+    try std.testing.expect(params.get("a") != null);
+    try std.testing.expect(params.get("p") != null);
+    try std.testing.expect(params.get("q") == null);
+}
+
+test "form: extractBoundary basic" {
+    const ct = "multipart/form-data; boundary=----WebKitFormBoundaryX";
+    const b = extractBoundaryTest(ct);
+    try std.testing.expect(b != null);
+    try std.testing.expectEqualStrings("----WebKitFormBoundaryX", b.?);
+}
+
+test "form: extractBoundary quoted" {
+    const ct = "multipart/form-data; boundary=\"----12345\"";
+    const b = extractBoundaryTest(ct);
+    try std.testing.expect(b != null);
+    try std.testing.expectEqualStrings("----12345", b.?);
+}
+
+test "form: extractBoundary no boundary" {
+    const ct = "application/x-www-form-urlencoded";
+    try std.testing.expect(extractBoundaryTest(ct) == null);
+}
+
+fn parseFormTest(data: []const u8, params: *Context.FormParams) void {
+    var it = std.mem.splitScalar(u8, data, '&');
+    while (it.next()) |pair| {
+        if (pair.len == 0) continue;
+        if (params.len >= Context.MAX_PARAMS) return;
+        if (std.mem.indexOfScalar(u8, pair, '=')) |eq| {
+            params.items[params.len] = .{ .key = pair[0..eq], .value = pair[eq + 1 ..] };
+            params.len += 1;
+        } else {
+            params.items[params.len] = .{ .key = pair, .value = "" };
+            params.len += 1;
+        }
+    }
+}
+
+fn extractBoundaryTest(content_type: []const u8) ?[]const u8 {
+    const marker = "boundary=";
+    const idx = std.mem.indexOf(u8, content_type, marker) orelse return null;
+    const start = idx + marker.len;
+    var end = start;
+    while (end < content_type.len and content_type[end] != ';' and content_type[end] != ' ') {
+        end += 1;
+    }
+    const raw = content_type[start..end];
+    if (raw.len >= 2 and raw[0] == '"' and raw[raw.len - 1] == '"') {
+        return raw[1 .. raw.len - 1];
+    }
+    return raw;
 }
 
 fn parseQueryTest(target: []const u8, query: *Context.QueryParams) void {

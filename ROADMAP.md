@@ -61,12 +61,12 @@
 - [x] Path parameters via `ctx.params.get("id")`
 - [x] Query parameters (`ctx.query.get("page")`)
 - [ ] Query string parsing (multi-value, nested)
-- [ ] Form data (URL-encoded, multipart)
+- [x] Form data (URL-encoded + multipart via `ctx.readForm()`)
 - [x] JSON body (`ctx.readBody()` → raw bytes)
 - [x] JSON body `ctx.readJson(T)` → typed struct
 - [ ] XML body parsing
-- [ ] File upload handling (multipart)
-- [ ] Cookie parsing
+- [x] File upload handling (multipart via `ctx.readForm().files`)
+- [x] Cookie parsing (`ctx.cookie(name)`)
 - [ ] Header helpers (typed accessors)
 
 ### Validation
@@ -97,7 +97,7 @@
 
 ### Headers & Cookies
 - [x] Response header setters (`ctx.header(name, value)`)
-- [ ] Cookie setters (`ctx.cookie(name, value, options)`)
+- [x] Cookie setters (`ctx.setCookie(name, value)`, `ctx.setCookieOpts(name, value, opts)`)
 - [ ] Cache control helpers
 - [ ] ETag auto-generation
 

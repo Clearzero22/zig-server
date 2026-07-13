@@ -72,6 +72,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "ex-context",       .path = "examples/13_context_responses.zig", .needs_sqlite = false },
         .{ .name = "ex-db",            .path = "examples/14_db.zig",              .needs_sqlite = true },
         .{ .name = "ex-server",        .path = "examples/15_server.zig",          .needs_sqlite = false },
+        .{ .name = "ex-cookies-form",  .path = "examples/16_cookies_form.zig",   .needs_sqlite = false },
     };
     inline for (examples) |ex| {
         const ex_mod = b.createModule(.{

@@ -7,6 +7,10 @@ pub const Method = @import("router.zig").Method;
 pub const Group = @import("router.zig").Group;
 pub const RouteOptions = @import("router.zig").RouteOptions;
 pub const RateLimitConfig = @import("router.zig").RateLimitConfig;
+pub const FormData = Context.FormData;
+pub const FormFile = Context.FormFile;
+pub const CookieOptions = Context.CookieOptions;
+pub const SameSite = Context.SameSite;
 
 pub const swagger = @import("builtins/swagger.zig");
 pub const cors = @import("builtins/cors.zig");
