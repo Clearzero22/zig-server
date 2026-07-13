@@ -28,22 +28,23 @@
 - [x] Middleware type definition (fn (ctx) bool)
 - [x] Global middleware stack
 - [x] Route-level middleware
-- [ ] Group-level middleware
+- [x] Group-level middleware
 - [ ] Middleware with `next` callback for wrapping
-- [ ] Post-processing (response after handler)
+- [x] Post-processing (response after handler via `after()` middleware)
 - [ ] Error middleware (catch errors from downstream)
-- [ ] Short-circuit / abort chain
+- [x] Short-circuit / abort chain (return false)
 
 ### Built-in Middleware
 - [x] Request logger
 - [x] Panic recovery / error handler
 - [x] CORS (Cross-Origin Resource Sharing)
-- [ ] Request ID generation
-- [ ] Request timeout
+- [x] Request ID generation
+- [x] Request timeout middleware
 - [ ] Rate limiting (token bucket, sliding window)
-- [ ] Body size limit
+- [x] Body size limit
 - [ ] CSRF protection
-- [ ] Secure headers (HSTS, X-Frame-Options, etc.)
+- [x] Secure headers (HSTS, X-Frame-Options, etc.)
+- [x] Environment variable support (`.env` + `std.os.getenv`)
 - [ ] Gzip / Brotli compression
 - [ ] ETag / conditional requests
 - [ ] Request validation (schema-based)
@@ -62,7 +63,7 @@
 - [ ] Query string parsing (multi-value, nested)
 - [ ] Form data (URL-encoded, multipart)
 - [x] JSON body (`ctx.readBody()` → raw bytes)
-- [ ] JSON body `ctx.readJson(T)` → typed struct
+- [x] JSON body `ctx.readJson(T)` → typed struct
 - [ ] XML body parsing
 - [ ] File upload handling (multipart)
 - [ ] Cookie parsing
@@ -83,9 +84,9 @@
 - [ ] `ctx.xml(status, body)`
 - [x] `ctx.redirect(status, url)`
 - [ ] `ctx.stream(reader, content_type)` — streaming responses
-- [ ] `ctx.file(path)` — file download
+- [x] `ctx.sendFile(path)` — file download
 - [ ] `ctx.attachment(path, filename)` — force download
-- [ ] `ctx.noContent()` — 204
+- [x] `ctx.noContent()` — 204
 - [ ] `ctx.status(code)` — set status only
 
 ### Serialization
@@ -95,7 +96,7 @@
 - [ ] Custom serializer per content type
 
 ### Headers & Cookies
-- [ ] Response header setters (`ctx.header(name, value)`)
+- [x] Response header setters (`ctx.header(name, value)`)
 - [ ] Cookie setters (`ctx.cookie(name, value, options)`)
 - [ ] Cache control helpers
 - [ ] ETag auto-generation
@@ -139,7 +140,8 @@
 - [ ] Connection pooling for reverse proxy
 - [ ] Request body streaming without buffering
 - [ ] Response streaming (chunked transfer)
-- [ ] Static file serving with sendfile(2)
+- [x] Static file serving (`ctx.sendFile()` + `router.static()`)
+- [ ] Sendfile(2) zero-copy optimization
 - [ ] Static file caching (ETag, Last-Modified, Cache-Control)
 - [ ] Static file directory listing
 - [ ] Static file pre-compression (.gz, .br)
@@ -183,7 +185,7 @@
 
 ## 9. Configuration
 
-- [ ] Environment variable support
+- [x] Environment variable support (`.env` file + `std.os.getenv`)
 - [ ] Config file support (JSON, TOML, YAML)
 - [x] Programmatic configuration
 - [ ] Environment-specific configs (dev/staging/prod)
