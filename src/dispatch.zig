@@ -2,6 +2,35 @@ const std = @import("std");
 const Context = @import("context.zig");
 const Router = @import("router.zig");
 
+var rate_counters: ?*std.StringHashMap(u32) = null;
+var rate_alloc: ?std.mem.Allocator = null;
+
+fn rateLimitCheck(ctx: *Context, config: Router.RateLimitConfig) !void {
+    const target = ctx.request.head.target;
+
+    if (rate_alloc == null) rate_alloc = ctx.allocator;
+    const alloc = rate_alloc.?;
+
+    if (rate_counters == null) {
+        const m = try alloc.create(std.StringHashMap(u32));
+        m.* = std.StringHashMap(u32).init(alloc);
+        rate_counters = m;
+    }
+    const counters = rate_counters.?;
+
+    const entry = counters.getPtr(target);
+    if (entry) |e| {
+        e.* += 1;
+        if (e.* > config.max_requests) {
+            try ctx.text(.too_many_requests, "Rate limit exceeded");
+            return error.RateLimited;
+        }
+    } else {
+        const key = try alloc.dupe(u8, target);
+        try counters.put(key, 1);
+    }
+}
+
 pub fn handleConnection(io: std.Io, router: *Router, conn: std.Io.net.Stream) void {
     defer conn.close(io);
 
@@ -58,8 +87,20 @@ pub fn dispatchInner(ctx: *Context, router: *Router) !void {
     ctx.params = match_result.params;
     ctx.db = router.db;
 
+    if (match_result.cors_origin) |origin| {
+        ctx.cors_origin = origin;
+    }
+
     for (router.middleware.items) |mw| {
         if (!try mw(ctx)) return;
+    }
+
+    for (match_result.middleware) |mw| {
+        if (!try mw(ctx)) return;
+    }
+
+    if (match_result.rate_limit) |rl| {
+        try rateLimitCheck(ctx, rl);
     }
 
     try match_result.handler(ctx);

@@ -35,6 +35,11 @@ pub const Method = enum {
 
 pub const Handler = *const fn (ctx: *Context) anyerror!void;
 
+pub const RateLimitConfig = struct {
+    window_ms: u64 = 60_000,
+    max_requests: u32 = 60,
+};
+
 pub const HeaderMatch = struct {
     name: []const u8,
     value: []const u8,
@@ -45,6 +50,9 @@ pub const RouteOptions = struct {
     priority: i32 = 0,
     host: ?[]const u8 = null,
     headers: ?[]const HeaderMatch = null,
+    middleware: ?[]const Middleware = null,
+    cors_origin: ?[]const u8 = null,
+    rate_limit: ?RateLimitConfig = null,
 
     summary: ?[]const u8 = null,
     description: ?[]const u8 = null,
@@ -77,6 +85,9 @@ pub const Route = struct {
     priority: i32 = 0,
     host: ?[]const u8 = null,
     headers: ?[]const HeaderMatch = null,
+    middleware: []const Middleware = &.{},
+    cors_origin: ?[]const u8 = null,
+    rate_limit: ?RateLimitConfig = null,
     has_wildcard: bool = false,
     segments: []const Segment = &.{},
     summary: ?[]const u8 = null,
@@ -90,6 +101,9 @@ pub const Route = struct {
 pub const MatchResult = struct {
     handler: Handler,
     params: Context.Params,
+    middleware: []const Middleware = &.{},
+    cors_origin: ?[]const u8 = null,
+    rate_limit: ?RateLimitConfig = null,
 };
 
 pub fn init(allocator: std.mem.Allocator) @This() {
@@ -115,6 +129,8 @@ pub fn deinit(self: *@This()) void {
             }
             self.allocator.free(hdrs);
         }
+        if (route.middleware.len > 0) self.allocator.free(route.middleware);
+        if (route.cors_origin) |c| self.allocator.free(c);
         for (route.segments) |seg| {
             if (seg == .multi_param) {
                 self.allocator.free(seg.multi_param);
@@ -162,7 +178,7 @@ fn addRoute(self: *@This(), method: Method, path: []const u8, handler: Handler, 
         self.allocator.free(segs);
     }
 
-    var hdrs_dup: ?[]HeaderMatch = null;
+    var     hdrs_dup: ?[]HeaderMatch = null;
     if (opts.headers) |hdrs| {
         hdrs_dup = try self.allocator.alloc(HeaderMatch, hdrs.len);
         for (hdrs, 0..) |h, i| {
@@ -173,6 +189,10 @@ fn addRoute(self: *@This(), method: Method, path: []const u8, handler: Handler, 
         }
     }
 
+    const mw_dup = if (opts.middleware) |mw| blk: {
+        break :blk try self.allocator.dupe(Middleware, mw);
+    } else null;
+
     try self.routes.append(self.allocator, .{
         .method = method,
         .path = path,
@@ -181,6 +201,9 @@ fn addRoute(self: *@This(), method: Method, path: []const u8, handler: Handler, 
         .priority = opts.priority,
         .host = if (opts.host) |h| try self.allocator.dupe(u8, h) else null,
         .headers = hdrs_dup,
+        .middleware = if (mw_dup) |m| m else &.{},
+        .cors_origin = if (opts.cors_origin) |c| try self.allocator.dupe(u8, c) else null,
+        .rate_limit = opts.rate_limit,
         .has_wildcard = has_wc,
         .segments = segs,
         .summary = if (opts.summary) |s| try self.allocator.dupe(u8, s) else null,
@@ -385,7 +408,13 @@ pub fn match(self: *@This(), method: Method, target: []const u8) ?MatchResult {
 
         var params: Context.Params = .{};
         if (matchSegments(route.segments, target, &params)) {
-            return .{ .handler = route.handler, .params = params };
+            return .{
+                .handler = route.handler,
+                .params = params,
+                .middleware = route.middleware,
+                .cors_origin = route.cors_origin,
+                .rate_limit = route.rate_limit,
+            };
         }
     }
     return null;
@@ -627,6 +656,57 @@ pub const Group = struct {
 pub fn group(self: *@This(), prefix: []const u8) Group {
     return .{ .router = self, .prefix = prefix };
 }
+
+pub fn mount(self: *@This(), prefix: []const u8, sub: *@This()) !void {
+    for (sub.routes.items) |route| {
+        const full = try concat(self.allocator, prefix, route.path);
+        const mw_dup = if (route.middleware.len > 0) try self.allocator.dupe(Middleware, route.middleware) else null;
+        const segs = try parseSegments(self.allocator, full);
+        const hdrs_dup: ?[]HeaderMatch = null;
+        try self.routes.append(self.allocator, .{
+            .method = route.method,
+            .path = full,
+            .handler = route.handler,
+            .name = null,
+            .priority = route.priority,
+            .host = null,
+            .headers = hdrs_dup,
+            .middleware = if (mw_dup) |m| m else &.{},
+            .cors_origin = null,
+            .rate_limit = route.rate_limit,
+            .has_wildcard = route.has_wildcard,
+            .segments = segs,
+            .summary = null,
+            .description = null,
+            .tags = null,
+            .deprecated = route.deprecated,
+            .body_type = null,
+            .response_type = null,
+        });
+    }
+}
+
+pub fn resource(self: *@This(), prefix: []const u8, handlers: anytype) !void {
+    if (@hasField(@TypeOf(handlers), "list")) try self.get(prefix, handlers.list);
+    if (@hasField(@TypeOf(handlers), "create")) try self.post(prefix, handlers.create);
+    if (@hasField(@TypeOf(handlers), "show")) {
+        const p = try std.fmt.allocPrint(self.allocator, "{s}/:id", .{prefix});
+        errdefer self.allocator.free(p);
+        try self.addRoute(.GET, p, handlers.show, .{});
+    }
+    if (@hasField(@TypeOf(handlers), "update")) {
+        const p = try std.fmt.allocPrint(self.allocator, "{s}/:id", .{prefix});
+        errdefer self.allocator.free(p);
+        try self.addRoute(.PUT, p, handlers.update, .{});
+    }
+    if (@hasField(@TypeOf(handlers), "destroy")) {
+        const p = try std.fmt.allocPrint(self.allocator, "{s}/:id", .{prefix});
+        errdefer self.allocator.free(p);
+        try self.addRoute(.DELETE, p, handlers.destroy, .{});
+    }
+}
+
+
 
 fn concat(allocator: std.mem.Allocator, prefix: []const u8, path: []const u8) ![]const u8 {
     if (std.mem.endsWith(u8, prefix, "/")) {

@@ -21,6 +21,11 @@ Zig: `C:\Users\Administrator\zig\0.16.0\zig-x86_64-windows-0.16.0\zig.exe`
 - No comments in source code
 - Router owns all memory, freed in deinit
 
+## Known Compiler Quirks
+
+- **`@hasDecl` / `@typeInfo` cross-module bug**: When a struct type is passed as `comptime T: type` to a function in another file, `@hasDecl(T, "name")` and `@typeInfo(T).@"struct".decls` incorrectly return empty. Use `@hasField(@TypeOf(instance), "name")` instead — it works across modules because it checks fields, not declarations.
+- **Affected APIs**: `resource()` uses `@hasField` with explicit handler fields (`.list = Ctrl.list, .show = Ctrl.show, ...`). Do NOT attempt to infer declarations with `@hasDecl` / `@typeInfo` across files.
+
 ## Workflow
 
 After every code change, run the full test suite:

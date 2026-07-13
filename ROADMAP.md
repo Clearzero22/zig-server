@@ -220,17 +220,17 @@
 - [ ] Migration runner with version tracking
 
 ### Input Validation & Security
-- [ ] DB route auth (currently auth only blocks `/admin`, not `/db/*`)
-- [ ] Input length validation on INSERT/UPDATE fields
-- [ ] Typed DB error propagation (replace 500 flattening)
+- [x] DB route auth (auth blocks `/admin` and `/db/*`)
+- [x] Input length validation on INSERT/UPDATE fields
+- [x] Typed DB error propagation (SQLiteConstraint → 409, SQLiteError → 400)
 
 ### SQLite Route Handlers
 - [x] `POST /db/init` — create users table
-- [x] `GET /db/users` — list all users
+- [x] `GET /db/users` — list all users (with `?limit=N&offset=M` pagination)
 - [x] `GET /db/users/:id` — get single user
-- [x] `POST /db/users` — create user
-- [ ] Pagination on `GET /db/users` (prevent OOM)
-- [ ] Error recovery in `getDb()` (return error instead of panic)
+- [x] `POST /db/users` — create user (with input validation)
+- [x] Pagination on `GET /db/users` (prevent OOM)
+- [x] Error recovery in `getDb()` (return error instead of panic)
 
 ### Future
 - [ ] Redis integration

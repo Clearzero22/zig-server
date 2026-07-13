@@ -446,6 +446,7 @@ test "router: lock allows match" {
 
 var mw_blocked: bool = false;
 var mw_called: bool = false;
+var route_mw_called: bool = false;
 
 fn middleWare(ctx: *Context) anyerror!bool {
     _ = ctx;
@@ -509,4 +510,151 @@ test "router: middleware are registered in order" {
     try router.use(M2.mw);
 
     try std.testing.expectEqual(@as(usize, 2), router.middleware.items.len);
+}
+
+test "router: route-level middleware" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    route_mw_called = false;
+
+    const RouteMW = struct {
+        fn mw(ctx: *Context) anyerror!bool {
+            _ = ctx;
+            route_mw_called = true;
+            return true;
+        }
+    };
+
+    const H = struct { fn h(_: *Context) !void {} };
+
+    try router.getOpts("/protected", H.h, .{
+        .middleware = &.{RouteMW.mw},
+    });
+    router.lock();
+
+    const r = router.match(.GET, "/protected");
+    try std.testing.expect(r != null);
+    try std.testing.expectEqual(@as(usize, 1), r.?.middleware.len);
+
+    for (r.?.middleware) |mw| {
+        var ctx = Context{ .io = undefined, .allocator = std.testing.allocator, .request = undefined };
+        try std.testing.expect(try mw(&ctx));
+    }
+    try std.testing.expect(route_mw_called);
+}
+
+test "router: route-level CORS origin" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    const H = struct { fn h(_: *Context) !void {} };
+
+    try router.getOpts("/cors", H.h, .{
+        .cors_origin = "https://example.com",
+    });
+    router.lock();
+
+    const r = router.match(.GET, "/cors");
+    try std.testing.expect(r != null);
+    try std.testing.expectEqualStrings("https://example.com", r.?.cors_origin.?);
+}
+
+test "router: route-level rate limit config" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    const H = struct { fn h(_: *Context) !void {} };
+
+    try router.getOpts("/limited", H.h, .{
+        .rate_limit = .{ .window_ms = 1000, .max_requests = 5 },
+    });
+    router.lock();
+
+    const r = router.match(.GET, "/limited");
+    try std.testing.expect(r != null);
+    try std.testing.expect(r.?.rate_limit != null);
+    try std.testing.expectEqual(@as(u32, 5), r.?.rate_limit.?.max_requests);
+    try std.testing.expectEqual(@as(u64, 1000), r.?.rate_limit.?.window_ms);
+}
+
+test "router: mount sub-routes" {
+    var sub = Router.init(std.testing.allocator);
+    defer sub.deinit();
+
+    const H = struct { fn h(_: *Context) !void {} };
+    try sub.get("/hello", H.h);
+
+    var parent = Router.init(std.testing.allocator);
+    defer parent.deinit();
+
+    try parent.mount("/api/v1", &sub);
+
+    try std.testing.expect(parent.match(.GET, "/api/v1/hello") != null);
+    try std.testing.expect(parent.match(.GET, "/api/v1") == null);
+}
+
+test "router: resource generates CRUD routes" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    const Ctrl = struct {
+        fn list(_: *Context) !void {}
+        fn show(_: *Context) !void {}
+        fn create(_: *Context) !void {}
+        fn update(_: *Context) !void {}
+        fn destroy(_: *Context) !void {}
+    };
+    try router.resource("/posts", .{
+        .list = Ctrl.list,
+        .show = Ctrl.show,
+        .create = Ctrl.create,
+        .update = Ctrl.update,
+        .destroy = Ctrl.destroy,
+    });
+    router.lock();
+
+    try std.testing.expect(router.match(.GET, "/posts") != null);
+    try std.testing.expect(router.match(.GET, "/posts/1") != null);
+    try std.testing.expect(router.match(.POST, "/posts") != null);
+    try std.testing.expect(router.match(.PUT, "/posts/1") != null);
+    try std.testing.expect(router.match(.DELETE, "/posts/1") != null);
+}
+
+test "router: resource only registers declared methods" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    const Ctrl = struct {
+        fn list(_: *Context) !void {}
+        fn create(_: *Context) !void {}
+    };
+    try router.resource("/items", .{
+        .list = Ctrl.list,
+        .create = Ctrl.create,
+    });
+    router.lock();
+
+    try std.testing.expect(router.match(.GET, "/items") != null);
+    try std.testing.expect(router.match(.POST, "/items") != null);
+    try std.testing.expect(router.match(.GET, "/items/1") == null);
+    try std.testing.expect(router.match(.PUT, "/items/1") == null);
+    try std.testing.expect(router.match(.DELETE, "/items/1") == null);
+}
+
+test "router: version prefix via group" {
+    var router = Router.init(std.testing.allocator);
+    defer router.deinit();
+
+    const H = struct { fn h(_: *Context) !void {} };
+    var v1 = router.group("/v1");
+    try v1.get("/users", H.h);
+
+    var v2 = router.group("/v2");
+    try v2.get("/users", H.h);
+    router.lock();
+
+    try std.testing.expect(router.match(.GET, "/v1/users") != null);
+    try std.testing.expect(router.match(.GET, "/v2/users") != null);
+    try std.testing.expect(router.match(.GET, "/v1/users/x") == null);
 }
