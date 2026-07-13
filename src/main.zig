@@ -14,6 +14,7 @@ pub fn main() !void {
     defer router.deinit();
 
     var db = try fw.db.init("app.db");
+    defer fw.db.deinit(&db);
     router.db = @ptrCast(&db);
 
     try router.setOpenApiInfo("Zig Server API", "1.0.0", "A Zig web framework example");
@@ -32,7 +33,7 @@ pub fn main() !void {
     try router.post("/echo", echoHandler);
     try router.get("/error", errorHandler);
 
-    try router.get("/db/init", dbInitHandler);
+    try router.post("/db/init", dbInitHandler);
     try router.get("/db/users", dbListHandler);
     try router.get("/db/users/:id", dbGetHandler);
     try router.post("/db/users", dbCreateHandler);
@@ -48,6 +49,8 @@ pub fn main() !void {
     var server = try fw.Server.initPool(io, &router, 4);
     try server.listen("0.0.0.0:8080");
 }
+
+const User = struct { id: i64, name: []const u8, email: []const u8 };
 
 fn auth(ctx: *fw.Context) !bool {
     if (std.mem.startsWith(u8, ctx.request.head.target, "/admin")) {
@@ -111,7 +114,7 @@ fn dbListHandler(c: *fw.Context) !void {
     const d = getDb(c);
     var stmt = try d.prepare("SELECT id, name, email FROM users");
     defer stmt.deinit();
-    const rows = try stmt.all(struct { id: i64, name: []const u8, email: []const u8 }, c.allocator, .{}, .{});
+    const rows = try stmt.all(User, c.allocator, .{}, .{});
     try c.jsonTyped(c.allocator, .ok, rows);
 }
 
@@ -126,12 +129,7 @@ fn dbGetHandler(c: *fw.Context) !void {
     };
     var stmt = try getDb(c).prepare("SELECT id, name, email FROM users WHERE id = ?");
     defer stmt.deinit();
-    const row = try stmt.oneAlloc(
-        struct { id: i64, name: []const u8, email: []const u8 },
-        c.allocator,
-        .{},
-        .{ .id = id },
-    );
+    const row = try stmt.oneAlloc(User, c.allocator, .{}, .{ .id = id });
     if (row) |r| {
         try c.jsonTyped(c.allocator, .ok, r);
     } else {
@@ -144,15 +142,36 @@ fn dbCreateHandler(c: *fw.Context) !void {
     defer c.allocator.free(body);
     const parsed = try std.json.parseFromSlice(std.json.Value, c.allocator, body, .{});
     defer parsed.deinit();
-    const name = parsed.value.object.get("name") orelse {
+    const obj = switch (parsed.value) {
+        .object => |o| o,
+        else => {
+            try c.text(.bad_request, "expected JSON object");
+            return;
+        },
+    };
+    const name_val = obj.get("name") orelse {
         try c.text(.bad_request, "missing name");
         return;
     };
-    const email = parsed.value.object.get("email") orelse {
+    const email_val = obj.get("email") orelse {
         try c.text(.bad_request, "missing email");
         return;
     };
-    try getDb(c).exec("INSERT INTO users (name, email) VALUES (?, ?)", .{}, .{ .name = name.string, .email = email.string });
+    const name = switch (name_val) {
+        .string => |s| s,
+        else => {
+            try c.text(.bad_request, "name must be a string");
+            return;
+        },
+    };
+    const email = switch (email_val) {
+        .string => |s| s,
+        else => {
+            try c.text(.bad_request, "email must be a string");
+            return;
+        },
+    };
+    try getDb(c).exec("INSERT INTO users (name, email) VALUES (?, ?)", .{}, .{ .name = name, .email = email });
     try c.json(.created, "{\"status\":\"created\"}");
 }
 

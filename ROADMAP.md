@@ -203,12 +203,38 @@
 
 ## 11. Database & Storage
 
+### SQLite
+- [x] SQLite database wrapper (`builtins/db/sqlite.zig`)
+- [x] In-memory database for testing (`db.initMemory()`)
+- [x] File-based database (`db.init(path)`)
+- [x] Prepared statements (`db.prepare()`)
+- [x] Typed row reading (`stmt.oneAlloc(T)`, `stmt.all(T)`)
+- [x] DDL operations (`CREATE TABLE`, etc.)
+- [x] CRUD operations (INSERT, SELECT, UPDATE, DELETE)
+- [x] Error handling with Zig error sets (SQLiteError, SQLiteConstraint)
+- [x] `getLastInsertRowID()` support
+- [x] Thread safety (`.Serialized` threading mode)
+- [x] Inline DB test suite (13 tests)
 - [ ] Connection pool management
-- [ ] Transaction middleware
-- [ ] Migration runner
-- [ ] Query builder (optional)
+- [ ] Transaction middleware / explicit transaction API
+- [ ] Migration runner with version tracking
+
+### Input Validation & Security
+- [ ] DB route auth (currently auth only blocks `/admin`, not `/db/*`)
+- [ ] Input length validation on INSERT/UPDATE fields
+- [ ] Typed DB error propagation (replace 500 flattening)
+
+### SQLite Route Handlers
+- [x] `POST /db/init` — create users table
+- [x] `GET /db/users` — list all users
+- [x] `GET /db/users/:id` — get single user
+- [x] `POST /db/users` — create user
+- [ ] Pagination on `GET /db/users` (prevent OOM)
+- [ ] Error recovery in `getDb()` (return error instead of panic)
+
+### Future
 - [ ] Redis integration
-- [ ] In-memory cache
+- [ ] In-memory cache layer
 - [ ] Session storage (memory, Redis, DB)
 
 ## 12. Authentication & Authorization

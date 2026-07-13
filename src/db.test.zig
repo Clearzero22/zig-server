@@ -1,11 +1,13 @@
 const std = @import("std");
-const sqlite = @import("sqlite");
 const db_mod = @import("builtins/db/sqlite.zig");
 
 const Row = struct { id: i64, label: []const u8 };
 
-fn freeRow(a: std.mem.Allocator, row: Row) void {
-    a.free(row.label);
+const create_items = "CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL)";
+
+fn freeRows(allocator: std.mem.Allocator, rows: []const Row) void {
+    for (rows) |r| allocator.free(r.label);
+    allocator.free(rows);
 }
 
 test "db: init memory and deinit" {
@@ -17,7 +19,7 @@ test "db: init memory and deinit" {
 test "db: create table and insert" {
     var db = try db_mod.initMemory();
     defer db.deinit();
-    try db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL)", .{}, .{});
+    try db.exec(create_items, .{}, .{});
     try db.exec("INSERT INTO items (label) VALUES (?)", .{}, .{ .label = "hello" });
     try db.exec("INSERT INTO items (label) VALUES (?)", .{}, .{ .label = "world" });
 }
@@ -25,14 +27,14 @@ test "db: create table and insert" {
 test "db: select single row" {
     var db = try db_mod.initMemory();
     defer db.deinit();
-    try db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL)", .{}, .{});
+    try db.exec(create_items, .{}, .{});
     try db.exec("INSERT INTO items (label) VALUES (?)", .{}, .{ .label = "zig" });
 
     var stmt = try db.prepare("SELECT id, label FROM items WHERE id = ?");
     defer stmt.deinit();
     const row_opt = try stmt.oneAlloc(Row, std.testing.allocator, .{}, .{ .id = @as(i64, 1) });
     if (row_opt) |row| {
-        defer freeRow(std.testing.allocator, row);
+        defer std.testing.allocator.free(row.label);
         try std.testing.expectEqual(@as(i64, 1), row.id);
         try std.testing.expectEqualStrings("zig", row.label);
     } else {
@@ -43,7 +45,7 @@ test "db: select single row" {
 test "db: select nonexistent row" {
     var db = try db_mod.initMemory();
     defer db.deinit();
-    try db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL)", .{}, .{});
+    try db.exec(create_items, .{}, .{});
     try db.exec("INSERT INTO items (label) VALUES (?)", .{}, .{ .label = "x" });
 
     var stmt = try db.prepare("SELECT id, label FROM items WHERE id = ?");
@@ -55,7 +57,7 @@ test "db: select nonexistent row" {
 test "db: select all rows" {
     var db = try db_mod.initMemory();
     defer db.deinit();
-    try db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL)", .{}, .{});
+    try db.exec(create_items, .{}, .{});
     try db.exec("INSERT INTO items (label) VALUES (?)", .{}, .{ .label = "a" });
     try db.exec("INSERT INTO items (label) VALUES (?)", .{}, .{ .label = "b" });
     try db.exec("INSERT INTO items (label) VALUES (?)", .{}, .{ .label = "c" });
@@ -63,10 +65,7 @@ test "db: select all rows" {
     var stmt = try db.prepare("SELECT id, label FROM items ORDER BY id");
     defer stmt.deinit();
     const rows = try stmt.all(Row, std.testing.allocator, .{}, .{});
-    defer {
-        for (rows) |r| std.testing.allocator.free(r.label);
-        std.testing.allocator.free(rows);
-    }
+    defer freeRows(std.testing.allocator, rows);
     try std.testing.expectEqual(@as(usize, 3), rows.len);
     try std.testing.expectEqualStrings("a", rows[0].label);
     try std.testing.expectEqualStrings("b", rows[1].label);
@@ -76,22 +75,19 @@ test "db: select all rows" {
 test "db: select from empty table" {
     var db = try db_mod.initMemory();
     defer db.deinit();
-    try db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL)", .{}, .{});
+    try db.exec(create_items, .{}, .{});
 
     var stmt = try db.prepare("SELECT id, label FROM items");
     defer stmt.deinit();
     const rows = try stmt.all(Row, std.testing.allocator, .{}, .{});
-    defer {
-        for (rows) |r| std.testing.allocator.free(r.label);
-        std.testing.allocator.free(rows);
-    }
+    defer freeRows(std.testing.allocator, rows);
     try std.testing.expectEqual(@as(usize, 0), rows.len);
 }
 
 test "db: update row" {
     var db = try db_mod.initMemory();
     defer db.deinit();
-    try db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL)", .{}, .{});
+    try db.exec(create_items, .{}, .{});
     try db.exec("INSERT INTO items (label) VALUES (?)", .{}, .{ .label = "old" });
 
     try db.exec("UPDATE items SET label = ? WHERE id = ?", .{}, .{ .label = "new", .id = @as(i64, 1) });
@@ -110,7 +106,7 @@ test "db: update row" {
 test "db: delete row" {
     var db = try db_mod.initMemory();
     defer db.deinit();
-    try db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL)", .{}, .{});
+    try db.exec(create_items, .{}, .{});
     try db.exec("INSERT INTO items (label) VALUES (?)", .{}, .{ .label = "temp" });
 
     try db.exec("DELETE FROM items WHERE id = ?", .{}, .{ .id = @as(i64, 1) });
@@ -125,7 +121,7 @@ test "db: delete row" {
 test "db: getLastInsertRowID" {
     var db = try db_mod.initMemory();
     defer db.deinit();
-    try db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL)", .{}, .{});
+    try db.exec(create_items, .{}, .{});
     try db.exec("INSERT INTO items (label) VALUES (?)", .{}, .{ .label = "first" });
     try std.testing.expectEqual(@as(i64, 1), db.getLastInsertRowID());
     try db.exec("INSERT INTO items (label) VALUES (?)", .{}, .{ .label = "second" });
@@ -135,7 +131,7 @@ test "db: getLastInsertRowID" {
 test "db: multiple inserts and row IDs" {
     var db = try db_mod.initMemory();
     defer db.deinit();
-    try db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL)", .{}, .{});
+    try db.exec(create_items, .{}, .{});
     var i: i64 = 1;
     while (i <= 10) : (i += 1) {
         try db.exec("INSERT INTO items (label) VALUES (?)", .{}, .{ .label = "x" });

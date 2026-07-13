@@ -13,7 +13,7 @@ pub fn init(path: [:0]const u8) InitError!Db {
     return try Db.init(.{
         .mode = .{ .File = path },
         .open_flags = .{ .write = true, .create = true },
-        .threading_mode = .MultiThread,
+        .threading_mode = .Serialized,
     });
 }
 
@@ -21,7 +21,7 @@ pub fn initMemory() InitError!Db {
     return try Db.init(.{
         .mode = .{ .Memory = {} },
         .open_flags = .{ .write = true, .create = true },
-        .threading_mode = .MultiThread,
+        .threading_mode = .Serialized,
     });
 }
 
